@@ -9,6 +9,7 @@ import '../../services/content_overrides.dart';
 import '../../services/srs_logic.dart';
 import '../../services/srs_service.dart';
 import '../../widgets/answer_spans.dart';
+import '../../widgets/correction_sheet.dart';
 import '../../widgets/flip_card.dart';
 import 'practice_history_screen.dart';
 
@@ -142,6 +143,20 @@ class _PracticeScreenState extends State<PracticeScreen>
   /// 纠错保存后立即重建（当前卡显示覆盖后的题干/答案）。
   void _onOverridesChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// ✎ 纠错：编辑**当前题目**的题干 + 答案（与复习页同款弹层），
+  /// 保存走 `content_overrides` 题级覆盖，当前卡与队列后续题立即生效。
+  Future<void> _openCorrection() async {
+    if (_index >= _queue.length) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final saved = await showQuestionCorrectionSheet(
+      context,
+      _queue[_index],
+    );
+    if (saved && mounted) {
+      messenger.showSnackBar(const SnackBar(content: Text('已保存')));
+    }
   }
 
   /// 中途退出：把「已完成部分」落盘（答完时已写过则跳过）。
@@ -334,7 +349,19 @@ class _PracticeScreenState extends State<PracticeScreen>
         if (didPop) _savePartialRecord();
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('习题模式')),
+        appBar: AppBar(
+          title: const Text('习题模式'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: '纠错',
+              visualDensity: VisualDensity.compact,
+              onPressed: !_grading && !_releasing && _index < _queue.length
+                  ? _openCorrection
+                  : null,
+            ),
+          ],
+        ),
         body: SafeArea(
           child: Column(
             children: [
