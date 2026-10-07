@@ -46,3 +46,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# 开发过程产物，不入库
+task*.txt
+/dist/
+/integration_output/
+*.apk
