@@ -28,7 +28,7 @@ class ReviewScreen extends StatefulWidget {
 }
 
 class _ReviewScreenState extends State<ReviewScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   List<Question> _queue = const [];
   int _index = 0;
   int _answered = 0;

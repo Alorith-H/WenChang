@@ -12,7 +12,8 @@ import '../../widgets/answer_spans.dart';
 import '../../widgets/flip_card.dart';
 import 'practice_history_screen.dart';
 
-/// 习题模式 · 答题页：所选章节的全部题目随机打乱，顶部进度 n/N。
+/// 习题模式 · 答题页：所选**小节**（选题页勾选的那些板块）的全部题目
+/// 随机打乱，顶部进度 n/N。
 ///
 /// 每题点按翻面看答案，然后**左滑 = 不会、右滑 = 会**（只有这两个方向，
 /// 背面另有两个按钮备选）。出场/入场沿用复习页 6a 的衔接：过阈值后当前
@@ -23,17 +24,17 @@ import 'practice_history_screen.dart';
 /// **完全独立于 SRS**：只统计会/不会，不写复习队列、不动每日统计与
 /// 打卡，也不影响学习/复习的到期计算。
 class PracticeScreen extends StatefulWidget {
-  /// 本次刷题的章节（选题页勾选的那几章）。
-  final List<Chapter> chapters;
+  /// 本次刷题的小节（选题页勾选的那些板块，跨章保持勾选顺序）。
+  final List<Section> sections;
 
-  const PracticeScreen({super.key, required this.chapters});
+  const PracticeScreen({super.key, required this.sections});
 
   @override
   State<PracticeScreen> createState() => _PracticeScreenState();
 }
 
 class _PracticeScreenState extends State<PracticeScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   List<Question> _queue = const [];
   int _index = 0;
   int _right = 0;
@@ -124,16 +125,14 @@ class _PracticeScreenState extends State<PracticeScreen>
     _overrides = scope.overrides;
     _overrides!.addListener(_onOverridesChanged);
 
-    // 所选章节的全部题目按章节顺序收集后随机打乱；按题 id 去重。
+    // 所选小节的全部题目按勾选顺序收集后随机打乱；按题 id 去重。
     final seen = <String>{};
     final queue = <Question>[];
-    for (final chapter in widget.chapters) {
-      for (final section in chapter.sections) {
-        final qs = scope.data.questionsBySec[section.id] ?? const [];
-        for (final q in qs) {
-          if (q.id.isNotEmpty && !seen.add(q.id)) continue;
-          queue.add(q);
-        }
+    for (final section in widget.sections) {
+      final qs = scope.data.questionsBySec[section.id] ?? const [];
+      for (final q in qs) {
+        if (q.id.isNotEmpty && !seen.add(q.id)) continue;
+        queue.add(q);
       }
     }
     queue.shuffle();
@@ -511,7 +510,7 @@ class _PracticeScreenState extends State<PracticeScreen>
                     onPressed: () => Navigator.of(context).pushReplacement(
                       MaterialPageRoute<void>(
                         builder: (_) => PracticeScreen(
-                          chapters: widget.chapters,
+                          sections: widget.sections,
                         ),
                       ),
                     ),
@@ -918,12 +917,12 @@ class _EmptyQueueView extends StatelessWidget {
                 Icon(Icons.quiz_outlined, size: 56, color: scheme.outline),
                 const SizedBox(height: 16),
                 const Text(
-                  '所选章节暂无题目',
+                  '所选小节暂无题目',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '换几章再试试',
+                  '换几个小节再试试',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,

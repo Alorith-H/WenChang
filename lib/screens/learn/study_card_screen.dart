@@ -135,14 +135,25 @@ class _StudyCardScreenState extends State<StudyCardScreen> {
 
   /// 板块第一张已被手动翻开 → 滑到该板块后续子卡时自动翻开
   /// （短暂渐显），并照常计入阅读进度；第一张永远手动。
+  ///
+  /// 挂载与翻开必须**错开一帧**：滑页时新页往往本帧才构建，若此刻直接把
+  /// `_flipped[page]` 置 true，FlipCard 的 controller 初值就等于 1 ——
+  /// 根本没有动画（用户看到的"瞬间切换"）。推迟到 post-frame 再翻，
+  /// 卡片已带着 false 挂载，下一帧 didUpdateWidget 才能真正跑 350ms 渐显。
   void _autoOpenIfArmed(int page) {
     final card = _cards[page];
     if (_flipped[page]) return; // 滑回已看过的：保持翻开
     if (card.index == 0) return; // 第一张仍需手动点按
     if (!_autoArmed.contains(card.section.id)) return;
-    _flipped[page] = true;
-    _autoOpened.add(page);
-    _markSeen(page);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 一帧的间隙里状态可能已变（手动翻过 / 已处理），只翻还没翻的。
+      if (!mounted || _flipped[page]) return;
+      setState(() {
+        _flipped[page] = true;
+        _autoOpened.add(page);
+      });
+      _markSeen(page);
+    });
   }
 
   /// Counts a sub-card as read (manual flip and auto-open share this path —

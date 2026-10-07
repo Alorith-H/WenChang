@@ -364,6 +364,16 @@ class _QuestionCorrectionSheetState extends State<_QuestionCorrectionSheet> {
             ),
             const SizedBox(height: 8),
             _EditField(controller: _a, hint: '答案文本'),
+            const SizedBox(height: 6),
+            Text(
+              '多空答案用 | 分隔，段数与题干 ____ 的个数一致、顺序一一对应'
+              '（例：张若虚|贺知章|张旭|包融）',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
             const SizedBox(height: 4),
             _SaveBar(enabled: true, onSave: _save),
           ],
