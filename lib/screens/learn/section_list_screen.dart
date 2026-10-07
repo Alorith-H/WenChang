@@ -53,7 +53,7 @@ class SectionListScreen extends StatelessWidget {
                   separatorBuilder: (_, _) => const Divider(),
                   itemBuilder: (context, i) {
                     final section = sections[i];
-                    final learned = srs.isLearnedToday(section.id);
+                    final learnedDay = srs.lastLearnedDay(section.id);
                     final total = splitSection(section).length;
                     final seen = srs.seenCount(section.id, total);
                     final scheme = Theme.of(context).colorScheme;
@@ -104,8 +104,10 @@ class SectionListScreen extends StatelessWidget {
                                   ],
                                 ),
                               ),
-                              if (learned) ...[
-                                const LearnedBadge(),
+                              if (learnedDay != null) ...[
+                                LearnedBadge(
+                                  label: srs.lastLearnedLabel(section.id),
+                                ),
                                 const SizedBox(width: 8),
                               ],
                               Icon(

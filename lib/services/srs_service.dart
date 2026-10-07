@@ -452,6 +452,33 @@ class SrsService extends ChangeNotifier {
   bool isLearnedToday(String sectionId, [DateTime? now]) =>
       learnedToday(now).contains(sectionId);
 
+  /// Most recent `yyyy-MM-dd` on which [sectionId] was fully read, or null
+  /// when it was never learned. `_learned` is kept forever and its keys are
+  /// day strings (字典序 = 时间序), so a descending scan finds the newest
+  /// matching day first.
+  String? lastLearnedDay(String sectionId) {
+    final days = _learned.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+    for (final day in days) {
+      if (_learned[day]?.contains(sectionId) ?? false) return day;
+    }
+    return null;
+  }
+
+  /// Badge text for [sectionId]: 「今日已学」when learned today; 「M月D日已学」
+  /// for another day of the current year; 「yyyy-MM-dd 已学」across a year
+  /// boundary; `''` when never learned. Display only — unlike
+  /// [isLearnedToday] it never drives queue/booking logic.
+  String lastLearnedLabel(String sectionId, [DateTime? now]) {
+    final day = lastLearnedDay(sectionId);
+    if (day == null) return '';
+    final current = now ?? DateTime.now();
+    if (day == formatDay(current)) return '今日已学';
+    final parsed = parseDay(day);
+    if (parsed == null || parsed.year != current.year) return '$day 已学';
+    return '${parsed.month}月${parsed.day}日已学';
+  }
+
   /// Sub-card indices of [sectionId] that were flipped to their back today.
   Set<int> seenCards(String sectionId, [DateTime? now]) {
     final day = formatDay(now ?? DateTime.now());

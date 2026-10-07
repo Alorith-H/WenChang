@@ -20,10 +20,10 @@ class SectionDetailScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(section.title)),
       body: ListenableBuilder(
-        // srs：今日已学徽标；overrides：纠错保存后要点立即刷新。
+        // srs：学习日期徽标；overrides：纠错保存后要点立即刷新。
         listenable: Listenable.merge([srs, AppScope.of(context).overrides]),
         builder: (context, _) {
-          final learned = srs.isLearnedToday(section.id);
+          final learnedDay = srs.lastLearnedDay(section.id);
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: [
@@ -39,7 +39,8 @@ class SectionDetailScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (learned) const LearnedBadge(),
+                  if (learnedDay != null)
+                    LearnedBadge(label: srs.lastLearnedLabel(section.id)),
                 ],
               ),
               const SizedBox(height: 8),

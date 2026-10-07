@@ -142,9 +142,13 @@ class SectionBody extends StatelessWidget {
   }
 }
 
-/// A small "今日已学" chip — a vermillion-tinted accent on paper.
+/// A small learned-state chip — a vermillion-tinted accent on paper.
+/// [label] carries the wording: 「今日已学」by default, or a date label
+/// like 「10月4日已学」when the section was learned on an earlier day.
 class LearnedBadge extends StatelessWidget {
-  const LearnedBadge({super.key});
+  final String label;
+
+  const LearnedBadge({super.key, this.label = '今日已学'});
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +165,7 @@ class LearnedBadge extends StatelessWidget {
           Icon(Icons.check_circle, size: 14, color: scheme.primary),
           const SizedBox(width: 4),
           Text(
-            '今日已学',
+            label,
             style: TextStyle(
               fontSize: 12,
               color: scheme.primary,

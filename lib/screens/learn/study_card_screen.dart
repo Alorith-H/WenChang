@@ -354,7 +354,7 @@ class _FrontFace extends StatelessWidget {
       listenable: scope.srs,
       builder: (context, _) {
         final srs = scope.srs;
-        final learned = srs.isLearnedToday(card.section.id);
+        final learnedDay = srs.lastLearnedDay(card.section.id);
         final seen = srs.seenCount(card.section.id, card.total);
         return Column(
           children: [
@@ -402,8 +402,10 @@ class _FrontFace extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(height: 18),
-                      if (learned)
-                        const LearnedBadge()
+                      if (learnedDay != null)
+                        LearnedBadge(
+                          label: srs.lastLearnedLabel(card.section.id),
+                        )
                       else
                         Text(
                           '$seen/${card.total} 已看',
@@ -478,11 +480,12 @@ class _BackFace extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final scope = AppScope.of(context);
 
-    // srs：今日已学徽标；overrides：纠错保存后要点立即刷新。
+    // srs：学习日期徽标；overrides：纠错保存后要点立即刷新。
     return ListenableBuilder(
       listenable: Listenable.merge([scope.srs, scope.overrides]),
       builder: (context, _) {
-        final learned = scope.srs.isLearnedToday(card.section.id);
+        final srs = scope.srs;
+        final learnedDay = srs.lastLearnedDay(card.section.id);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -509,9 +512,9 @@ class _BackFace extends StatelessWidget {
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
-                  if (learned) ...[
+                  if (learnedDay != null) ...[
                     const SizedBox(width: 8),
-                    const LearnedBadge(),
+                    LearnedBadge(label: srs.lastLearnedLabel(card.section.id)),
                   ],
                 ],
               ),
