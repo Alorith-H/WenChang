@@ -23,6 +23,11 @@ class AppScope extends InheritedWidget {
   /// 选题页「收藏夹」入口按它组队。
   final Favorites favorites;
 
+  /// 数据重载回调（议题 #3 导入后就地刷新）：触发 _Bootstrap 重新
+  /// load。重载期间 FutureBuilder 保留旧快照 → 树形不变，SnackBar 与
+  /// 路由栈都不丢；完成后本 widget 的新实例通知依赖方重建。
+  final VoidCallback? reloadData;
+
   const AppScope({
     super.key,
     required this.data,
@@ -30,6 +35,7 @@ class AppScope extends InheritedWidget {
     required this.overrides,
     required this.customQuestions,
     required this.favorites,
+    this.reloadData,
     required super.child,
   });
 
@@ -45,5 +51,6 @@ class AppScope extends InheritedWidget {
       srs != oldWidget.srs ||
       overrides != oldWidget.overrides ||
       customQuestions != oldWidget.customQuestions ||
-      favorites != oldWidget.favorites;
+      favorites != oldWidget.favorites ||
+      reloadData != oldWidget.reloadData;
 }

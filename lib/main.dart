@@ -123,15 +123,12 @@ class _BootstrapState extends State<_Bootstrap> {
     return FutureBuilder<_Boot>(
       future: _future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return _app(
-            themeMode: initialMode,
-            home: const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            ),
-          );
-        }
-        if (snapshot.hasError || !snapshot.hasData) {
+        // 首次加载：没有旧数据可退 —— 加载中转圈、出错进错误页。
+        // 导入后的重载（_retry 换 future）：FutureBuilder 在等待期保留
+        // 上一份快照（hasData 为真），这里继续用旧 UI 渲染 —— 树形不变，
+        // SnackBar 与路由栈都留在原地；新数据就绪后 AppScope 的新实例
+        // 通知依赖方重建（见 updateShouldNotify）。
+        if (snapshot.hasError && !snapshot.hasData) {
           return _app(
             themeMode: initialMode,
             home: Scaffold(
@@ -151,6 +148,14 @@ class _BootstrapState extends State<_Bootstrap> {
             ),
           );
         }
+        if (!snapshot.hasData) {
+          return _app(
+            themeMode: initialMode,
+            home: const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            ),
+          );
+        }
         final boot = snapshot.data!;
         // Rebuild (and re-apply the text scale / theme color / theme mode)
         // only when the 字号、主题色 or 深色模式 changes, not on every grade.
@@ -160,6 +165,8 @@ class _BootstrapState extends State<_Bootstrap> {
           overrides: boot.overrides,
           customQuestions: boot.customQuestions,
           favorites: boot.favorites,
+          // 设置页导入成功后调用：重载题库 / 资料 / 各存储（议题 #3）。
+          reloadData: _retry,
           child: ListenableBuilder(
             listenable: Listenable.merge([
               boot.srs.fontScaleListenable,

@@ -1,14 +1,22 @@
+import 'dart:convert' show utf8;
+import 'dart:typed_data' show Uint8List;
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../app_scope.dart';
+import '../services/backup_transfer.dart';
+import '../services/imported_bank.dart';
 import '../services/srs_service.dart';
 import '../services/update_check.dart';
 import '../theme/app_theme.dart';
 import '../widgets/font_scale_sheet.dart';
 import '../widgets/update_dialog.dart';
 
-/// 设置页：主题色 / 深色模式 / 复习随机 / 字号 / 检查更新 / 清空学习记录。
+/// 设置页：主题色 / 深色模式 / 复习随机 / 字号 / 检查更新 /
+/// 数据导入导出（议题 #3）/ 清空学习记录。
 ///
 /// 全部设置即时生效并持久化在 SharedPreferences（主题色、深色模式、复习
 /// 随机、字号由 [SrsService] 持有；清空记录只动学习数据，不动这些设置）。
@@ -29,6 +37,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 手动「检查更新」进行中（≤8s；期间行不可再点，转圈不出 8 秒）。
   bool _checkingUpdate = false;
+
+  /// 导出 / 导入进行中（选文件、弹模式框、编码分享期间防重复点击）。
+  bool _transferring = false;
 
   @override
   void didChangeDependencies() {
@@ -287,6 +298,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ),
+          // 数据导入导出（议题 #3）：导出走 share_plus 分享面板，导入走
+          // file_selector 选文件 → 校验 → 覆盖 / 差异模式 → 落库重载。
+          _sectionTitle(context, '数据导入导出'),
+          _card(
+            child: Column(
+              children: [
+                ListTile(
+                  enabled: !_transferring,
+                  onTap: () => _exportBackup(context),
+                  title: const Text(
+                    '导出题库与资料',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    '备份当前生效的题库、资料、纠错、自建题与收藏（JSON 文件）',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: scheme.outline,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
+                ListTile(
+                  enabled: !_transferring,
+                  onTap: () => _importBackup(context),
+                  title: const Text(
+                    '导入题库与资料',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    '选择备份文件，可选「覆盖」整体替换或「差异」逐条合并',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: scheme.outline,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
+              ],
+            ),
+          ),
           _sectionTitle(context, '数据'),
           _card(
             child: ListTile(
@@ -357,6 +419,139 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!context.mounted) return;
     await showUpdateDialog(context, release);
   }
+
+  /// 导出（议题 #3 A）：生效题库 / 资料 + 纠错 + 自建题 + 收藏编码成一个
+  /// JSON（`encodeBackup`，导前即完成可序列化校验），经 share_plus 分享
+  /// 面板发出，文件名 `wenchang-backup-YYYYMMDD.json`。任何一步失败都只
+  /// SnackBar 提示，绝不崩。
+  Future<void> _exportBackup(BuildContext context) async {
+    if (_transferring) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final scope = AppScope.of(context);
+    setState(() => _transferring = true);
+    try {
+      final text = encodeBackup(
+        questions: scope.data.questions,
+        source: scope.data.doc,
+        overrides: scope.overrides.toJson(),
+        customQuestions: scope.customQuestions.items,
+        favoriteQids: scope.favorites.qids,
+      );
+      final result = await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              Uint8List.fromList(utf8.encode(text)),
+              mimeType: 'application/json',
+            ),
+          ],
+          fileNameOverrides: [backupFileName(DateTime.now())],
+        ),
+      );
+      if (result.status == ShareResultStatus.unavailable) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('导出失败：无法打开分享面板')),
+        );
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    } finally {
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
+  /// 导入（议题 #3 B）：file_selector 选 `.json` → [parseBackup] 校验 →
+  /// 模式对话框（覆盖 / 差异）→ 合并 → [persistImportedBackup] 落库 →
+  /// SnackBar 报实数 → [AppScope.reloadData] 就地生效（无需重启）。
+  /// 校验失败明确报错、不落库；学习进度 / 打卡 / 练习记录的 key 不碰。
+  Future<void> _importBackup(BuildContext context) async {
+    if (_transferring) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _transferring = true);
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(label: '备份文件', extensions: ['json']),
+        ],
+      );
+      if (file == null) return; // 取消选文件。
+
+      final parsed = parseBackup(await file.readAsString());
+      if (!parsed.ok) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('导入失败：${parsed.error}')),
+        );
+        return;
+      }
+      if (!context.mounted) return;
+      final mode = await _askImportMode(context);
+      if (mode == null) return; // 取消导入。
+
+      if (!context.mounted) return;
+      final scope = AppScope.of(context);
+      final local = BackupData(
+        questions: scope.data.questions,
+        source: scope.data.doc,
+        overrides: scope.overrides.toJson(),
+        custom: scope.customQuestions.items,
+        favoriteQids: scope.favorites.qids.toList(),
+      );
+      final fileData = parsed.backup!;
+
+      final String message;
+      if (mode == 'replace') {
+        final data = applyReplace(file: fileData, local: local);
+        await persistImportedBackup(data);
+        message = '导入成功：覆盖 ${data.questions.length} 题';
+      } else {
+        final outcome = applyDiff(file: fileData, local: local);
+        await persistImportedBackup(outcome.data);
+        message = '导入成功：差异新增 ${outcome.questionsAdded} '
+            '替换 ${outcome.questionsReplaced}';
+      }
+      messenger.showSnackBar(SnackBar(content: Text(message)));
+      if (!context.mounted) return;
+      AppScope.of(context).reloadData?.call();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导入失败：$e')));
+    } finally {
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
+  /// 导入模式二选一：返回 `'replace'` / `'diff'` / null（取消）。
+  /// 覆盖 = 整体替换；差异 = 逐条三分支合并（语义见 [applyDiff]）。
+  Future<String?> _askImportMode(BuildContext context) => showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('选择导入方式'),
+      content: const Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('覆盖：整体替换题库与资料；文件里的纠错、自建题、收藏一并替换（文件缺该段则保留现状）。'),
+          SizedBox(height: 10),
+          Text('差异：逐条对比 —— 文件多出或不同的新增 / 替换，本地多出的保留。'),
+          SizedBox(height: 10),
+          Text('两种方式都不影响学习进度、打卡与练习记录。'),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('取消'),
+        ),
+        OutlinedButton(
+          onPressed: () => Navigator.of(ctx).pop('diff'),
+          child: const Text('差异导入'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop('replace'),
+          child: const Text('覆盖导入'),
+        ),
+      ],
+    ),
+  );
 
   /// 二次确认后清空学习记录（学习进度、复习安排、已标熟记录、练习记录），
   /// 不动题库、资料数据、纠错覆盖与设置。

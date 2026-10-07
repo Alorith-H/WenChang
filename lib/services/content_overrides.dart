@@ -25,7 +25,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import 'app_data.dart';
 
-const _kOverridesKey = 'content_overrides';
+/// 纠错覆盖的存储 key（导入导出落库也要写它，见 `imported_bank.dart`）。
+const kContentOverridesKey = 'content_overrides';
 
 /// 某条要点被覆盖前的原文与红字分段 —— 保存回原文时用来恢复 segs。
 class _OrigBullet {
@@ -74,7 +75,7 @@ class ContentOverrides extends ChangeNotifier {
     final bullets = <String, String>{};
     final questions = <String, Map<String, String>>{};
     try {
-      final raw = prefs.getString(_kOverridesKey);
+      final raw = prefs.getString(kContentOverridesKey);
       if (raw != null) {
         final decoded = jsonDecode(raw);
         if (decoded is Map<String, dynamic>) {
@@ -282,12 +283,16 @@ class ContentOverrides extends ChangeNotifier {
     if (a != null) question.a = a;
   }
 
-  Future<void> _persist() async {
-    try {
-      await _prefs.setString(_kOverridesKey, jsonEncode({
+  /// 导出用：当前纠错覆盖的原始结构，与 [_persist] 落库格式逐字一致
+  /// （备份文件的 `overrides` 段，见议题 #3 导入导出）。
+  Map<String, dynamic> toJson() => <String, dynamic>{
         'bullet': _bullets,
         'question': _questions,
-      }));
+      };
+
+  Future<void> _persist() async {
+    try {
+      await _prefs.setString(kContentOverridesKey, jsonEncode(toJson()));
     } catch (_) {
       // Best effort: 纠错内容丢失也绝不能让界面崩溃。
     }

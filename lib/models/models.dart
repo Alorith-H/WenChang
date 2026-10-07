@@ -19,6 +19,9 @@ class BulletSeg {
   final bool red;
 
   const BulletSeg({required this.text, this.red = false});
+
+  /// 序列化回 `source.json` 原格式 `[text, 1|0]`（导入导出往返用）。
+  List<Object?> toJson() => <Object?>[text, red ? 1 : 0];
 }
 
 /// A single bullet point. [key] marks an important bullet (kept for
@@ -47,6 +50,12 @@ class Bullet {
       segs: _parseSegs(m['segs']),
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        't': t,
+        'key': key,
+        if (segs != null) 'segs': segs!.map((s) => s.toJson()).toList(),
+      };
 }
 
 /// Tolerant `segs` parser: missing key, wrong type, empty array or broken
@@ -82,6 +91,11 @@ class Item {
       bullets: _asList(m['bullets']).map(Bullet.fromJson).toList(),
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'title': title,
+        'bullets': bullets.map((b) => b.toJson()).toList(),
+      };
 }
 
 /// A section (板块) — the unit of study cards.
@@ -110,6 +124,13 @@ class Section {
   }
 
   bool get isEmpty => items.isEmpty && bullets.isEmpty;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
+        'title': title,
+        'items': items.map((i) => i.toJson()).toList(),
+        'bullets': bullets.map((b) => b.toJson()).toList(),
+      };
 }
 
 /// A chapter (章) grouping sections.
@@ -129,6 +150,12 @@ class Chapter {
       sections: _asList(m['sections']).map(Section.fromJson).toList(),
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
+        'title': title,
+        'sections': sections.map((s) => s.toJson()).toList(),
+      };
 }
 
 /// The whole `source.json` document.
@@ -160,6 +187,12 @@ class SourceDoc {
       chapters: _asList(m['chapters']).map(Chapter.fromJson).toList(),
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'title': title,
+        'subtitle': subtitle,
+        'chapters': chapters.map((c) => c.toJson()).toList(),
+      };
 }
 
 /// One review question from `questions.json`.
@@ -195,6 +228,15 @@ class Question {
       src: _asStr(m['src']),
     );
   }
+
+  /// 全字段序列化（导入导出往返用；`q`/`a` 是当前生效文本）。
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
+        'sec': sec,
+        'q': q,
+        'a': a,
+        'src': src,
+      };
 }
 
 /// Where a section lives in the chapter tree.

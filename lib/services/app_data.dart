@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../models/models.dart';
+import 'imported_bank.dart';
 
 class AppData {
   final SourceDoc doc;
@@ -30,9 +31,14 @@ class AppData {
       chapters.fold(0, (sum, c) => sum + c.sections.length);
 
   /// Never throws: unreadable / malformed files degrade to empty data.
+  ///
+  /// 生效数据的优先级（议题 #3 导入）：SharedPreferences 里有导入版
+  /// （`imported_questions` / `imported_source`）就用导入版，**按段回退**
+  /// —— 哪段缺 / 损坏就哪段用 assets，绝不写 assets。
   static Future<AppData> load() async {
-    final doc = await _loadSource();
-    final questions = await _loadQuestions();
+    final imported = await ImportedBank.load();
+    final doc = imported.source ?? await _loadSource();
+    final questions = imported.questions ?? await _loadQuestions();
 
     final sectionIndex = <String, SectionLocation>{};
     for (final chapter in doc.chapters) {
