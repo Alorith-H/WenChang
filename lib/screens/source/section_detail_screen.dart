@@ -3,12 +3,28 @@ import 'package:flutter/material.dart';
 import '../../app_scope.dart';
 import '../../models/models.dart';
 import '../../widgets/content_views.dart';
+import '../../widgets/correction_sheet.dart';
 
 /// 资料模式第三层：板块的完整阅读版式（条目可折叠/展开）。
 class SectionDetailScreen extends StatelessWidget {
   final SectionLocation location;
 
   const SectionDetailScreen({super.key, required this.location});
+
+  /// ✎ 纠错：与学习模式**同一套**弹层与保存通道 —— [showBulletCorrectionSheet]
+  /// 编辑整板块要点，保存走 `content_overrides` 板块级 key，学习模式 /
+  /// 资料模式全局共用同一份覆盖。本页的 ListenableBuilder 已监听
+  /// overrides，弹层一关要点即刷新。
+  Future<void> _openCorrection(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final saved = await showBulletCorrectionSheet(
+      context,
+      location.section,
+    );
+    if (saved && context.mounted) {
+      messenger.showSnackBar(const SnackBar(content: Text('已保存')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +34,17 @@ class SectionDetailScreen extends StatelessWidget {
     final srs = AppScope.of(context).srs;
 
     return Scaffold(
-      appBar: AppBar(title: Text(section.title)),
+      appBar: AppBar(
+        title: Text(section.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: '纠错',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _openCorrection(context),
+          ),
+        ],
+      ),
       body: ListenableBuilder(
         // srs：学习日期徽标；overrides：纠错保存后要点立即刷新。
         listenable: Listenable.merge([srs, AppScope.of(context).overrides]),
