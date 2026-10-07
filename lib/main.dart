@@ -4,6 +4,8 @@ import 'app_scope.dart';
 import 'screens/home_screen.dart';
 import 'services/app_data.dart';
 import 'services/content_overrides.dart';
+import 'services/custom_questions.dart';
+import 'services/favorites.dart';
 import 'services/srs_service.dart';
 
 void main() {
@@ -40,10 +42,14 @@ class _BootstrapState extends State<_Bootstrap> {
     // 纠错覆盖先于数据加载：attach 时把它合并进题库/资料数据树，
     // 之后所有页面（学习、资料、题目、复习、刷题）读到的都是覆盖后的内容。
     final overrides = await ContentOverrides.load();
+    // 自建题与收藏夹同批加载：attach 时把自建题的出题实例一并登记，
+    // 纠错覆盖按 qid（含 cq- 自建题）天然生效。
+    final customQuestions = await CustomQuestions.load();
+    final favorites = await Favorites.load();
     final data = await AppData.load();
-    overrides.attach(data);
+    overrides.attach(data, customQuestions: customQuestions.questions);
     final srs = await SrsService.load();
-    return _Boot(data, srs, overrides);
+    return _Boot(data, srs, overrides, customQuestions, favorites);
   }
 
   void _retry() {
@@ -210,6 +216,8 @@ class _BootstrapState extends State<_Bootstrap> {
           data: boot.data,
           srs: boot.srs,
           overrides: boot.overrides,
+          customQuestions: boot.customQuestions,
+          favorites: boot.favorites,
           child: ListenableBuilder(
             listenable: Listenable.merge([
               boot.srs.fontScaleListenable,
@@ -231,6 +239,14 @@ class _Boot {
   final AppData data;
   final SrsService srs;
   final ContentOverrides overrides;
+  final CustomQuestions customQuestions;
+  final Favorites favorites;
 
-  const _Boot(this.data, this.srs, this.overrides);
+  const _Boot(
+    this.data,
+    this.srs,
+    this.overrides,
+    this.customQuestions,
+    this.favorites,
+  );
 }

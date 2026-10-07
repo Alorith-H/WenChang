@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app_scope.dart';
 import '../../models/models.dart';
 import '../../services/app_data.dart';
+import '../../widgets/custom_question_sheet.dart';
 import 'practice_history_screen.dart';
 import 'practice_screen.dart';
 
@@ -13,7 +14,10 @@ import 'practice_screen.dart';
 /// - 章行下面常驻**小节列表**（缩进、独立复选框），点按单独勾选；
 /// - 开始刷题 = 所有**已勾选小节**的题；至少 1 个小节才能开始
 ///   （按钮置灰 + 提示）；
-/// - 默认**全不选**（避免误开始全量），顶部可一键全选 / 清空。
+/// - 默认**全不选**（避免误开始全量），顶部可一键全选 / 清空；
+/// - 底部另有两个入口：「添加习题」（自建题弹层，含管理区）与
+///   「收藏夹」（按收藏 qid 组队刷题）—— 自建题计入各层题数，
+///   并在开局时并入候选池（见 `buildPracticeQueue`）。
 ///
 /// 版面沿用纸墨 UI（章 = 圆角色块，小节 = 卡内缩进行 + 发丝分隔线）。
 /// 右上角 🕘 仍是「练习记录」入口。
@@ -31,17 +35,24 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   static String _key(int chapterIndex, int sectionIndex) =>
       '$chapterIndex/$sectionIndex';
 
-  /// 一个小节里的可刷题数。
-  int _sectionQuestionCount(AppData data, Section section) =>
-      section.id.isEmpty ? 0 : (data.questionsBySec[section.id]?.length ?? 0);
+  /// 一个小节里的可刷题数：原生题 + 该板块的自建题。
+  int _sectionQuestionCount(AppData data, Section section) {
+    if (section.id.isEmpty) return 0;
+    final custom = AppScope.of(context).customQuestions;
+    return (data.questionsBySec[section.id]?.length ?? 0) +
+        custom.countFor(section.id);
+  }
 
-  /// 一章里可刷的题数：各板块题目按 section id 归组求和（板块 id 去重）。
+  /// 一章里可刷的题数：各板块（原生 + 自建）按 section id 归组求和
+  /// （板块 id 去重）。
   int _chapterQuestionCount(AppData data, Chapter chapter) {
     var count = 0;
     final seen = <String>{};
+    final custom = AppScope.of(context).customQuestions;
     for (final section in chapter.sections) {
       if (section.id.isEmpty || !seen.add(section.id)) continue;
-      count += data.questionsBySec[section.id]?.length ?? 0;
+      count += (data.questionsBySec[section.id]?.length ?? 0) +
+          custom.countFor(section.id);
     }
     return count;
   }
@@ -98,6 +109,26 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     if (sections.isEmpty) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => PracticeScreen(sections: sections)),
+    );
+  }
+
+  /// 「+ 添加习题」：打开自建题弹层（级联选板块 + 题干 + 答案，底部
+  /// 管理区可删）。弹层里可能已增 / 删，返回后**无条件**刷新计数；
+  /// 新增成功才给「已添加」轻提示。
+  Future<void> _openAddSheet() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final added = await showAddQuestionSheet(context);
+    if (!mounted) return;
+    setState(() {}); // 各层题数含自建题，需重建。
+    if (added) {
+      messenger.showSnackBar(const SnackBar(content: Text('已添加')));
+    }
+  }
+
+  /// 「⭐ 收藏夹」：按收藏 qid 组队进答题页（队列为空时答题页给空态）。
+  void _openFavorites() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const PracticeScreen.favorites()),
     );
   }
 
@@ -186,6 +217,29 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                       itemBuilder: (context, i) =>
                           _chapterBlock(data, chapters[i], i),
                     ),
+            ),
+            // 底部两个入口：添加习题（自建题弹层）+ 收藏夹（组队刷题）。
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _openAddSheet,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('添加习题'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _openFavorites,
+                      icon: const Icon(Icons.star_rounded, size: 18),
+                      label: const Text('收藏夹'),
+                    ),
+                  ),
+                ],
+              ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),

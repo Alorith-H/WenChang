@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import '../../app_scope.dart';
 import '../../models/models.dart';
 import '../../services/content_overrides.dart';
+import '../../services/custom_questions.dart';
+import '../../services/favorites.dart';
 import '../../services/srs_logic.dart';
 import '../../services/srs_service.dart';
 import '../../widgets/answer_spans.dart';
@@ -24,11 +26,28 @@ import 'practice_history_screen.dart';
 ///
 /// **完全独立于 SRS**：只统计会/不会，不写复习队列、不动每日统计与
 /// 打卡，也不影响学习/复习的到期计算。
+///
+/// 候选池 = 原生题 + 命中板块的**自建题**（[buildPracticeQueue]）；
+/// [PracticeScreen.favorites] 则按收藏 qid 组队（[buildFavoriteQueue]）。
+/// AppBar 右侧 ☆/★ 收藏切换写 `favorite_qids` —— 收藏夹模式里取消收藏
+/// 不动已开局队列（照常答完本题，下次进入才消失）。
 class PracticeScreen extends StatefulWidget {
   /// 本次刷题的小节（选题页勾选的那些板块，跨章保持勾选顺序）。
   final List<Section> sections;
 
-  const PracticeScreen({super.key, required this.sections});
+  /// true = 收藏夹开局：队列由收藏 qid 构建（[sections] 不参与）。
+  final bool favoritesMode;
+
+  const PracticeScreen({
+    super.key,
+    required this.sections,
+    this.favoritesMode = false,
+  });
+
+  /// 收藏夹开局：用当前收藏的题组队刷题。
+  const PracticeScreen.favorites({super.key})
+      : sections = const [],
+        favoritesMode = true;
 
   @override
   State<PracticeScreen> createState() => _PracticeScreenState();
@@ -96,8 +115,16 @@ class _PracticeScreenState extends State<PracticeScreen>
   /// 纠错覆盖服务（didChangeDependencies 里取）。
   ContentOverrides? _overrides;
 
+  /// 收藏夹服务（didChangeDependencies 里取；星标切换用）。
+  Favorites? _favorites;
+
   /// 题库/记录服务（didChangeDependencies 里取，落盘时不再依赖 context）。
   SrsService? _srs;
+
+  /// 当前卡是否已收藏（AppBar 星标实心 + 强调色的依据）。
+  bool get _isCurrentFavorite =>
+      _index < _queue.length &&
+      _favorites?.isFavorite(_queue[_index].id) == true;
 
   /// 手势接管的总开关：翻开看到答案、不在评分、不在飞出/回弹。
   bool get _canSwipe =>
@@ -124,20 +151,35 @@ class _PracticeScreenState extends State<PracticeScreen>
     final scope = AppScope.of(context);
     _srs = scope.srs;
     _overrides = scope.overrides;
+    _favorites = scope.favorites;
     _overrides!.addListener(_onOverridesChanged);
 
-    // 所选小节的全部题目按勾选顺序收集后随机打乱；按题 id 去重。
-    final seen = <String>{};
-    final queue = <Question>[];
-    for (final section in widget.sections) {
-      final qs = scope.data.questionsBySec[section.id] ?? const [];
-      for (final q in qs) {
-        if (q.id.isNotEmpty && !seen.add(q.id)) continue;
-        queue.add(q);
-      }
-    }
+    // 队列只在此构建一次：普通模式 = 所选小节原生题 + 命中板块的自建题
+    // （按 qid 去重）；收藏夹模式 = 按收藏顺序取题。随后统一随机打乱。
+    // 之后取消收藏 / 删自建题都不重建队列 —— 本局照常答完，下次进入才变。
+    final queue = widget.favoritesMode
+        ? buildFavoriteQueue(
+            favoriteIds: scope.favorites.qids,
+            nativeQuestions: scope.data.questions,
+            customQuestions: scope.customQuestions.questions,
+          )
+        : buildPracticeQueue(
+            sections: widget.sections,
+            questionsBySec: scope.data.questionsBySec,
+            customQuestions: scope.customQuestions.questions,
+          );
     queue.shuffle();
     _queue = queue;
+  }
+
+  /// ☆/★ 收藏切换：写 `favorite_qids`，当前卡星标立即刷新。收藏夹模式
+  /// 里取消收藏也不动当前队列（题对象照常答完，下次进入才消失）。
+  Future<void> _toggleFavorite() async {
+    if (_grading || _releasing || _index >= _queue.length) return;
+    final id = _queue[_index].id;
+    if (id.isEmpty) return;
+    await _favorites?.toggle(id);
+    if (mounted) setState(() {});
   }
 
   /// 纠错保存后立即重建（当前卡显示覆盖后的题干/答案）。
@@ -337,11 +379,14 @@ class _PracticeScreenState extends State<PracticeScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (_queue.isEmpty) return const _EmptyQueueView();
+    if (_queue.isEmpty) {
+      return _EmptyQueueView(favoritesMode: widget.favoritesMode);
+    }
     if (_index >= _queue.length) return _buildResult(context);
 
     final scheme = Theme.of(context).colorScheme;
     final progress = _index / _queue.length;
+    final favorite = _isCurrentFavorite;
 
     return PopScope<void>(
       // 返回键 / 侧滑退出：已完成部分立刻落盘（答完则已写过，跳过）。
@@ -350,8 +395,20 @@ class _PracticeScreenState extends State<PracticeScreen>
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('习题模式'),
+          title: Text(widget.favoritesMode ? '收藏夹' : '习题模式'),
           actions: [
+            // ☆/★ 收藏切换：与 ✎ 纠错在右侧配对（已收藏实心星 + 强调色）。
+            IconButton(
+              icon: Icon(
+                favorite ? Icons.star_rounded : Icons.star_border_rounded,
+                color: favorite ? scheme.primary : null,
+              ),
+              tooltip: favorite ? '取消收藏' : '收藏',
+              visualDensity: VisualDensity.compact,
+              onPressed: !_grading && !_releasing && _index < _queue.length
+                  ? _toggleFavorite
+                  : null,
+            ),
             IconButton(
               icon: const Icon(Icons.edit_outlined),
               tooltip: '纠错',
@@ -543,6 +600,7 @@ class _PracticeScreenState extends State<PracticeScreen>
                       MaterialPageRoute<void>(
                         builder: (_) => PracticeScreen(
                           sections: widget.sections,
+                          favoritesMode: widget.favoritesMode,
                         ),
                       ),
                     ),
@@ -930,15 +988,18 @@ class _ResultHairline extends StatelessWidget {
   }
 }
 
-/// 所选章节没有一道题（数据异常时的兜底页）。
+/// 空队列兜底页：普通模式 = 所选小节没有一道题；收藏夹模式 = 还没收藏
+/// 任何题（空态风格与其余空态一致）。
 class _EmptyQueueView extends StatelessWidget {
-  const _EmptyQueueView();
+  final bool favoritesMode;
+
+  const _EmptyQueueView({required this.favoritesMode});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('习题模式')),
+      appBar: AppBar(title: Text(favoritesMode ? '收藏夹' : '习题模式')),
       body: SafeArea(
         child: Center(
           child: Padding(
@@ -946,15 +1007,24 @@ class _EmptyQueueView extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.quiz_outlined, size: 56, color: scheme.outline),
+                Icon(
+                  favoritesMode
+                      ? Icons.star_border_rounded
+                      : Icons.quiz_outlined,
+                  size: 56,
+                  color: scheme.outline,
+                ),
                 const SizedBox(height: 16),
-                const Text(
-                  '所选小节暂无题目',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                Text(
+                  favoritesMode ? '收藏夹还没有题目' : '所选小节暂无题目',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '换几个小节再试试',
+                  favoritesMode ? '答题时点亮 ☆ 收藏，之后集中重刷' : '换几个小节再试试',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,

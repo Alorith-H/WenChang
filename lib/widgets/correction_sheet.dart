@@ -13,6 +13,9 @@ import '../services/content_overrides.dart';
 /// 保存写入 SharedPreferences `content_overrides` 并就地合并进已加载的
 /// 数据树（见 [ContentOverrides]），返回 true 表示已保存 —— 调用方据此
 /// 给出「已保存」轻提示。文本改回原文时自动删除覆盖、恢复红字。
+///
+/// 弹层公共外壳（[SheetHeader] / [GroupHeader] / [EditField] / [SaveBar]）
+/// 同时供「添加习题」弹层复用（见 `custom_question_sheet.dart`）。
 Future<bool> showBulletCorrectionSheet(BuildContext context, Section section) {
   return _showSheet<bool>(context, _BulletCorrectionSheet(section: section));
 }
@@ -35,11 +38,11 @@ Future<bool> _showSheet<T>(BuildContext context, Widget sheet) async {
 }
 
 /// 弹层公共外壳：拖拽把手 + 标题 + 可选副标题。
-class _SheetHeader extends StatelessWidget {
+class SheetHeader extends StatelessWidget {
   final String title;
   final String? subtitle;
 
-  const _SheetHeader({required this.title, this.subtitle});
+  const SheetHeader({super.key, required this.title, this.subtitle});
 
   @override
   Widget build(BuildContext context) {
@@ -81,10 +84,10 @@ class _SheetHeader extends StatelessWidget {
 }
 
 /// 小节分组标题（条目名），纸墨风小号字距标签。
-class _GroupHeader extends StatelessWidget {
+class GroupHeader extends StatelessWidget {
   final String text;
 
-  const _GroupHeader(this.text);
+  const GroupHeader(this.text, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -107,11 +110,11 @@ class _GroupHeader extends StatelessWidget {
 }
 
 /// 统一样式的编辑框：纸色填充、无描边、圆角 12，长文本自动增高。
-class _EditField extends StatelessWidget {
+class EditField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
 
-  const _EditField({required this.controller, required this.hint});
+  const EditField({super.key, required this.controller, required this.hint});
 
   @override
   Widget build(BuildContext context) {
@@ -136,11 +139,11 @@ class _EditField extends StatelessWidget {
 }
 
 /// 底部「保存」按钮条（含安全区与键盘上方留白）。
-class _SaveBar extends StatelessWidget {
+class SaveBar extends StatelessWidget {
   final bool enabled;
   final VoidCallback onSave;
 
-  const _SaveBar({required this.enabled, required this.onSave});
+  const SaveBar({super.key, required this.enabled, required this.onSave});
 
   @override
   Widget build(BuildContext context) {
@@ -247,7 +250,7 @@ class _BulletCorrectionSheetState extends State<_BulletCorrectionSheet> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-              child: _SheetHeader(title: '纠错 · 板块要点', subtitle: widget.section.title),
+              child: SheetHeader(title: '纠错 · 板块要点', subtitle: widget.section.title),
             ),
             Divider(color: scheme.outlineVariant),
             Expanded(
@@ -269,8 +272,8 @@ class _BulletCorrectionSheetState extends State<_BulletCorrectionSheet> {
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (spec.header != null) _GroupHeader(spec.header!),
-                            _EditField(
+                            if (spec.header != null) GroupHeader(spec.header!),
+                            EditField(
                               controller: _controllers[spec.key]!,
                               hint: '要点内容',
                             ),
@@ -280,7 +283,7 @@ class _BulletCorrectionSheetState extends State<_BulletCorrectionSheet> {
                       },
                     ),
             ),
-            _SaveBar(enabled: _specs.isNotEmpty, onSave: _save),
+            SaveBar(enabled: _specs.isNotEmpty, onSave: _save),
           ],
         ),
       ),
@@ -339,7 +342,7 @@ class _QuestionCorrectionSheetState extends State<_QuestionCorrectionSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SheetHeader(title: '纠错 · 题目'),
+            const SheetHeader(title: '纠错 · 题目'),
             const SizedBox(height: 14),
             Text(
               '题干',
@@ -351,7 +354,7 @@ class _QuestionCorrectionSheetState extends State<_QuestionCorrectionSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            _EditField(controller: _q, hint: '题目文本（____ 保留为空位）'),
+            EditField(controller: _q, hint: '题目文本（____ 保留为空位）'),
             const SizedBox(height: 16),
             Text(
               '答案',
@@ -363,7 +366,7 @@ class _QuestionCorrectionSheetState extends State<_QuestionCorrectionSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            _EditField(controller: _a, hint: '答案文本'),
+            EditField(controller: _a, hint: '答案文本'),
             const SizedBox(height: 6),
             Text(
               '多空答案用 | 分隔，段数与题干 ____ 的个数一致、顺序一一对应'
@@ -375,7 +378,7 @@ class _QuestionCorrectionSheetState extends State<_QuestionCorrectionSheet> {
               ),
             ),
             const SizedBox(height: 4),
-            _SaveBar(enabled: true, onSave: _save),
+            SaveBar(enabled: true, onSave: _save),
           ],
         ),
       ),

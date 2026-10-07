@@ -19,8 +19,11 @@ class PracticeRecordDetailScreen extends StatelessWidget {
     final scope = AppScope.of(context);
 
     // qid → Question（错题回查；找不到的 id 跳过，数据不会因此崩）。
+    // 自建题（cq-）同样回查得到 —— 与原生题同等参与练习历史。
     final byId = <String, Question>{
       for (final q in scope.data.questions)
+        if (q.id.isNotEmpty) q.id: q,
+      for (final q in scope.customQuestions.questions)
         if (q.id.isNotEmpty) q.id: q,
     };
     final wrongs = <Question>[

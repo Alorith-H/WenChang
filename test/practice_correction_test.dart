@@ -6,6 +6,8 @@ import 'package:wenchang/models/models.dart';
 import 'package:wenchang/screens/practice/practice_screen.dart';
 import 'package:wenchang/services/app_data.dart';
 import 'package:wenchang/services/content_overrides.dart';
+import 'package:wenchang/services/custom_questions.dart';
+import 'package:wenchang/services/favorites.dart';
 import 'package:wenchang/services/srs_service.dart';
 
 /// 习题答题页的 ✎ 纠错入口 —— 必须与复习页**同一套**交互：
@@ -21,6 +23,8 @@ void main() {
   late AppData data;
   late SrsService srs;
   late ContentOverrides overrides;
+  late CustomQuestions customQuestions;
+  late Favorites favorites;
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -30,7 +34,9 @@ void main() {
     data = await AppData.load();
     srs = await SrsService.load();
     overrides = await ContentOverrides.load();
-    overrides.attach(data);
+    customQuestions = await CustomQuestions.load();
+    favorites = await Favorites.load();
+    overrides.attach(data, customQuestions: customQuestions.questions);
     expect(data.questions, isNotEmpty, reason: '题库资产应能从测试资产包加载');
   });
 
@@ -52,6 +58,8 @@ void main() {
         data: data,
         srs: srs,
         overrides: overrides,
+        customQuestions: customQuestions,
+        favorites: favorites,
         child: MaterialApp(
           home: PracticeScreen(sections: [sectionWithQuestions(data)]),
         ),

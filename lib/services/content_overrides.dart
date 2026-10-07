@@ -108,7 +108,11 @@ class ContentOverrides extends ChangeNotifier {
 
   /// 把持久化的覆盖合并进 [data] 的数据树，并记住树里各条目的位置 ——
   /// 必须在 AppData 加载后、界面首绘前调用一次。
-  void attach(AppData data) {
+  ///
+  /// [customQuestions] = 自建题的出题实例（`CustomQuestions.questions`）：
+  /// 它们不在数据树里，但同样按 qid 登记原文快照并套用覆盖 —— 自建题的
+  /// 纠错因此与原生题走同一套存储与生效路径（按 qid 天然生效）。
+  void attach(AppData data, {Iterable<Question> customQuestions = const []}) {
     _sections.clear();
     _questionById.clear();
     _origBullets.clear();
@@ -122,6 +126,11 @@ class ContentOverrides extends ChangeNotifier {
       }
     }
     for (final q in data.questions) {
+      if (q.id.isEmpty) continue;
+      _questionById.putIfAbsent(q.id, () => q);
+      _origQuestions.putIfAbsent(q.id, () => _OrigQuestion(q.q, q.a));
+    }
+    for (final q in customQuestions) {
       if (q.id.isEmpty) continue;
       _questionById.putIfAbsent(q.id, () => q);
       _origQuestions.putIfAbsent(q.id, () => _OrigQuestion(q.q, q.a));
@@ -201,6 +210,18 @@ class ContentOverrides extends ChangeNotifier {
     }
     if (!changed) return;
     _applyQuestion(qid);
+    await _persist();
+    notifyListeners();
+  }
+
+  /// 删除某题的题级覆盖（删除自建题时的联动清理走这里，见
+  /// `deleteCustomQuestion`）。登记过的题会立即恢复原文，随后持久化
+  /// 并通知；本来就没有覆盖时不落盘。
+  Future<void> removeQuestion(String qid) async {
+    if (qid.isEmpty) return;
+    final removed = _questions.remove(qid) != null;
+    _applyQuestion(qid);
+    if (!removed) return;
     await _persist();
     notifyListeners();
   }
