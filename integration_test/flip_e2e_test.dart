@@ -1,4 +1,4 @@
-// 真机翻面动画 E2E：三条路径在 150/500/900ms 抓取中间帧证据。
+// 真机翻面动画 E2E：三条路径在 60/200/340ms 抓取中间帧证据。
 //
 // 运行：flutter test integration_test -d 19faf100 --no-uninstall
 // 断言：每个采样点存在 FlipCard 正/背面的 Opacity value ∈ (0.02, 0.98)
@@ -8,11 +8,12 @@
 // 与内部 /data/data/... 双备份，最后汇总打印文件清单。
 //
 // 时钟：live binding 下 AnimationController 只在 pump 帧按真实流逝时间打点，
-// 所以用 Stopwatch 记录真实毫秒，再 pump 到目标时刻采样；截图耗时计入
-// Stopwatch，下一个采样点自动补差。
+// 所以用 Stopwatch 记录真实毫秒，再 pump 到目标时刻采样。
 //
-// easeInOut(1000ms) 在恰好 900ms 时 back=0.981 已越过 (0.02, 0.98) 上界，
-// 故第三个采样点名义 900ms、实际落在 ~800–890ms 窗口（打印真实时刻）。
+// easeInOut(400ms) 的 (0.02, 0.98) 窗口约为 39–360ms。第三个采样点名义
+// 340ms、实际 pump 到 320ms 起采（帧抖动 ~20ms 不会顶出 360ms 上界）。
+// 截图是平台通道往返（~100–300ms），必须排在三次采样断言全部通过之后，
+// 否则截图耗时会把后续采样点推出窗口——故只在第 3 点断言后落一张。
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -86,13 +87,16 @@ Future<void> _shoot(WidgetTester tester, String name) async {
   expect(saved, isTrue, reason: '截图 $name 未能写入设备任何存储路径');
 }
 
-/// 采样当前中间帧：打印 faces、断言存在 (0.02, 0.98) 内的值、截图存档。
+/// 采样当前中间帧：打印 faces、断言存在 (0.02, 0.98) 内的值。
+/// [shoot] 只在最后一次采样置 true——截图的平台通道往返会吃掉 400ms
+/// 动画窗口，夹在采样点之间必然把后续点推出 (0.02, 0.98)。
 Future<void> _captureMid(
   WidgetTester tester,
   String path,
   int nominalMs,
-  int actualMs,
-) async {
+  int actualMs, {
+  bool shoot = false,
+}) async {
   final faces = _faceOpacities(tester);
   final mid = faces.any((v) => v > 0.02 && v < 0.98);
   print(
@@ -105,7 +109,9 @@ Future<void> _captureMid(
     reason: '[$path] ${actualMs}ms 处没有 Opacity ∈ (0.02, 0.98) 的翻面中间帧，'
         'faces=${_fmt(faces)}',
   );
-  await _shoot(tester, '${path}_${nominalMs}ms');
+  if (shoot) {
+    await _shoot(tester, '${path}_${nominalMs}ms');
+  }
 }
 
 /// pump 到 Stopwatch 指定时刻（目标已过则立即 pump 一帧）。
@@ -118,7 +124,7 @@ Future<void> _pumpTo(WidgetTester tester, Stopwatch sw, int targetMs) async {
   }
 }
 
-/// 点按翻面后的 150/500/900ms 三次采样 + 结束态（全 0 或全 1）断言。
+/// 点按翻面后的 60/200/340ms 三次采样 + 结束态（全 0 或全 1）断言。
 Future<void> _sampleFlipPath(
   WidgetTester tester,
   String path,
@@ -130,15 +136,16 @@ Future<void> _sampleFlipPath(
   print('[$path] frame0 faces=${_fmt(_faceOpacities(tester))} '
       'sw=${sw.elapsedMilliseconds}ms');
 
-  await _pumpTo(tester, sw, 150);
-  await _captureMid(tester, path, 150, sw.elapsedMilliseconds);
+  await _pumpTo(tester, sw, 60);
+  await _captureMid(tester, path, 60, sw.elapsedMilliseconds);
 
-  await _pumpTo(tester, sw, 500);
-  await _captureMid(tester, path, 500, sw.elapsedMilliseconds);
+  await _pumpTo(tester, sw, 200);
+  await _captureMid(tester, path, 200, sw.elapsedMilliseconds);
 
-  // 名义 900ms：easeInOut 在 900ms 处已出界，实际窗口取 ≥800 即采。
-  await _pumpTo(tester, sw, 800);
-  await _captureMid(tester, path, 900, sw.elapsedMilliseconds);
+  // 名义 340ms：pump 目标取 320，给帧抖动留余量（360ms 处 front 跌破
+  // 0.02 出界）。断言通过后才截图——截图耗时不计入采样窗口。
+  await _pumpTo(tester, sw, 320);
+  await _captureMid(tester, path, 340, sw.elapsedMilliseconds, shoot: true);
 
   await tester.pump(const Duration(milliseconds: 350));
   final settled = _faceOpacities(tester);
@@ -168,7 +175,7 @@ Future<int> _sampleAuto(WidgetTester tester) async {
     }
     final actual = sw.elapsedMilliseconds;
     print(
-      '[study_auto] 350ms 渐显 实际 ${actual}ms '
+      '[study_auto] 250ms 渐显 实际 ${actual}ms '
       'faces=${_fmt(faces)} midFrame=true',
     );
     await _shoot(tester, 'study_auto_mid${shots + 1}');
@@ -177,7 +184,7 @@ Future<int> _sampleAuto(WidgetTester tester) async {
   expect(
     shots,
     greaterThan(0),
-    reason: '自动翻开 350ms 渐显全程没有中间帧（lastFaces=${_fmt(lastFaces)}）'
+    reason: '自动翻开 250ms 渐显全程没有中间帧（lastFaces=${_fmt(lastFaces)}）'
         '——若挂载同帧置 flipped=true，controller 初值=1 将没有动画',
   );
   print('[study_auto] 捕获 mid 帧 $shots 张');
@@ -259,7 +266,7 @@ void main() {
     final binding = tester.binding as IntegrationTestWidgetsFlutterBinding;
 
     // 系统若上报「移除动画」（AccessibilityFeatures.disableAnimations），
-    // AnimationBehavior.normal 会把 1000ms 翻面压到 5% = 50ms，中间帧
+    // AnimationBehavior.normal 会把 400ms 翻面压到 5% = 20ms，中间帧
     // 物理上不存在。测试里强制恢复正常时长（debug 构建下此开关生效）。
     final platformDisableAnimations = binding
         .platformDispatcher
@@ -267,7 +274,7 @@ void main() {
         .disableAnimations;
     debugSemanticsDisableAnimations = false;
     print('[env] 平台 disableAnimations=$platformDisableAnimations '
-        '→ 测试强制 debugSemanticsDisableAnimations=false（翻面 1000ms 全速）');
+        '→ 测试强制 debugSemanticsDisableAnimations=false（翻面 400ms 全速）');
 
     await binding.convertFlutterSurfaceToImage();
     await tester.pump();
@@ -309,7 +316,7 @@ void main() {
       await tester.tap(find.byType(PageView));
     });
 
-    // ---------- 路径 B：滑动到第二张 · 自动翻开 350ms ----------
+    // ---------- 路径 B：滑动到第二张 · 自动翻开 250ms ----------
     await tester.drag(find.byType(PageView), const Offset(-500, 0));
     final autoShots = await _sampleAuto(tester);
     expect(
@@ -380,15 +387,12 @@ void main() {
 
     // ---------- 汇总 ----------
     print('======== E2E 翻面中间帧检测汇总 ========');
-    print('[学习·点按] 150/500/900ms mid-frame: PASS '
-        '→ study_flip_150ms / study_flip_500ms / study_flip_900ms');
-    print('[学习·自动翻开] 350ms mid-frame: PASS ×$autoShots '
+    print('[学习·点按] 60/200/340ms mid-frame: PASS → study_flip_340ms');
+    print('[学习·自动翻开] 250ms mid-frame: PASS ×$autoShots '
         '→ study_auto_mid1..$autoShots');
-    print('[习题·点按] 150/500/900ms mid-frame: PASS '
-        '→ practice_flip_150ms / practice_flip_500ms / practice_flip_900ms');
+    print('[习题·点按] 60/200/340ms mid-frame: PASS → practice_flip_340ms');
     if (reviewRan) {
-      print('[复习·点按] 150/500/900ms mid-frame: PASS '
-          '→ review_flip_150ms / review_flip_500ms / review_flip_900ms');
+      print('[复习·点按] 60/200/340ms mid-frame: PASS → review_flip_340ms');
     } else {
       print('[复习·点按] SKIP（复习队列为空）');
     }

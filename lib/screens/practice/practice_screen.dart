@@ -56,8 +56,8 @@ class _PracticeScreenState extends State<PracticeScreen>
   /// 评级阈值（px）。
   static const double _swipeThreshold = 120;
 
-  /// FlipCard 翻面 1s 动画的中点：过半后答案面才可交互。
-  static const Duration _flipHalf = Duration(milliseconds: 500);
+  /// FlipCard 翻面 400ms 动画的中点：过半后答案面才可交互。
+  static const Duration _flipHalf = Duration(milliseconds: 200);
 
   /// 出场：沿滑动方向飞出 + 淡出的时长。
   static const Duration _exitDuration = Duration(milliseconds: 250);
@@ -164,7 +164,7 @@ class _PracticeScreenState extends State<PracticeScreen>
     );
   }
 
-  /// 轻点翻面；翻到背面时先关手势闸门，1s 动画过半（答案显形）再开。
+  /// 轻点翻面；翻到背面时先关手势闸门，400ms 动画过半（答案显形）再开。
   void _toggleFlip() {
     if (_releasing || _grading) return;
     _flipGateTimer?.cancel();
@@ -394,23 +394,28 @@ class _PracticeScreenState extends State<PracticeScreen>
                               fit: StackFit.expand,
                               children: [
                                 // 只有横向两个方向：右 = 会、左 = 不会。
-                                GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onHorizontalDragStart: _onSwipeStart,
-                                  onHorizontalDragUpdate: _onSwipeUpdate,
-                                  onHorizontalDragEnd: _onSwipeEnd,
-                                  onHorizontalDragCancel: _onSwipeCancel,
-                                  child: FlipCard(
-                                    key: ValueKey<String>(_queue[_index].id),
-                                    flipped: _flipped,
-                                    onTap: _toggleFlip,
-                                    front: _PracticeFront(
-                                      question: _queue[_index],
-                                    ),
-                                    back: _PracticeBack(
-                                      question: _queue[_index],
-                                      onGrade: _gradeByButton,
-                                      enabled: !_grading && !_releasing,
+                                // RepaintBoundary 在动画节点（Opacity/Transform）
+                                // 内侧、满文本卡外侧：飞出/跟手期间整卡位图只
+                                // 栅格化一次，每帧只做变换+透明度合成（掉帧修复）。
+                                RepaintBoundary(
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onHorizontalDragStart: _onSwipeStart,
+                                    onHorizontalDragUpdate: _onSwipeUpdate,
+                                    onHorizontalDragEnd: _onSwipeEnd,
+                                    onHorizontalDragCancel: _onSwipeCancel,
+                                    child: FlipCard(
+                                      key: ValueKey<String>(_queue[_index].id),
+                                      flipped: _flipped,
+                                      onTap: _toggleFlip,
+                                      front: _PracticeFront(
+                                        question: _queue[_index],
+                                      ),
+                                      back: _PracticeBack(
+                                        question: _queue[_index],
+                                        onGrade: _gradeByButton,
+                                        enabled: !_grading && !_releasing,
+                                      ),
                                     ),
                                   ),
                                 ),

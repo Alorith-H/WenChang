@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wenchang/widgets/flip_card.dart';
 
 /// FlipCard 的渐入渐出必须是**可证伪**的：翻面后 50ms 正面已经开始淡出、
-/// 背面已经开始淡入（而不是瞬间硬切），1s 后动画到达终态。
+/// 背面已经开始淡入（而不是瞬间硬切），400ms 后动画到达终态。
 ///
 /// 定位方式：只在 FlipCard 子树里找「包含指定文案的 Opacity」，双面常驻
 /// （正反面一直挂在树里，只有 opacity 在动），所以两个面各自对应唯一一枚
@@ -19,7 +19,7 @@ void main() {
   double opacity(WidgetTester tester, String text) =>
       tester.widget<Opacity>(opacityOf(text)).opacity;
 
-  testWidgets('翻面 50ms 时正面淡出中、背面淡入中，1s 后到达终态',
+  testWidgets('翻面 50ms 时正面淡出中、背面淡入中，400ms 后到达终态',
       (WidgetTester tester) async {
     var flipped = false;
 
@@ -61,7 +61,7 @@ void main() {
     expect(opacity(tester, 'BACK'), greaterThan(0.0),
         reason: '50ms 时背面应已开始淡入（硬切 = bug）');
 
-    // 泵满 1s 动画：正面不可见、背面完全显示，状态完成。
+    // 泵过 400ms 动画时长（1s 充足）：正面不可见、背面完全显示，状态完成。
     await tester.pump(const Duration(milliseconds: 1000));
     await tester.pumpAndSettle();
     expect(opacity(tester, 'FRONT'), moreOrLessEquals(0.0));

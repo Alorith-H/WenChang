@@ -47,8 +47,8 @@ class _ReviewScreenState extends State<ReviewScreen>
   /// 评级阈值（px），三个方向共用。
   static const double _swipeThreshold = 120;
 
-  /// FlipCard 翻面 1s 动画的中点：过半后答案面才可交互，手势同步等过半。
-  static const Duration _flipHalf = Duration(milliseconds: 500);
+  /// FlipCard 翻面 400ms 动画的中点：过半后答案面才可交互，手势同步等过半。
+  static const Duration _flipHalf = Duration(milliseconds: 200);
 
   /// 手势评级出场：当前卡沿滑动方向飞出 + 淡出的时长。
   static const Duration _flyDuration = Duration(milliseconds: 250);
@@ -141,7 +141,7 @@ class _ReviewScreenState extends State<ReviewScreen>
     }
   }
 
-  /// 轻点翻面；翻到背面时先关手势闸门，1s 动画过半（答案显形）再开。
+  /// 轻点翻面；翻到背面时先关手势闸门，400ms 动画过半（答案显形）再开。
   /// 出场 / 评级进行中不接受翻面，避免出场卡中途翻转跳变。
   void _toggleFlip() {
     if (_releasing || _grading) return;
@@ -444,28 +444,34 @@ class _ReviewScreenState extends State<ReviewScreen>
                             children: [
                               // 横向手势整卡可用（右=熟练、左=忘记）；
                               // 竖向手势在答案内容里，见 _ReviewBack。
-                              GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onHorizontalDragStart: _onSwipeStart,
-                                onHorizontalDragUpdate: _onSwipeUpdate,
-                                onHorizontalDragEnd: _onSwipeEnd,
-                                onHorizontalDragCancel: _onSwipeCancel,
-                                child: FlipCard(
-                                  key: ValueKey<String>(_queue[_index].id),
-                                  flipped: _flipped,
-                                  onTap: _toggleFlip,
-                                  front: _ReviewFront(question: _queue[_index]),
-                                  back: _ReviewBack(
-                                    question: _queue[_index],
-                                    onGrade: _gradeByButton,
-                                    enabled: !_grading && !_releasing,
-                                    scrollController: _answerScroll,
-                                    drag: _VerticalDragCallbacks(
-                                      onStart: _onSwipeStart,
-                                      onUpdate: _onSwipeUpdate,
-                                      onEnd: _onSwipeEnd,
-                                      onCancel: _onSwipeCancel,
-                                      shouldAccept: _shouldStealVertical,
+                              // RepaintBoundary 在动画节点（Opacity/Transform）
+                              // 内侧、满文本卡外侧：飞出/跟手期间整卡位图只
+                              // 栅格化一次，每帧只做变换+透明度合成（掉帧修复）。
+                              RepaintBoundary(
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onHorizontalDragStart: _onSwipeStart,
+                                  onHorizontalDragUpdate: _onSwipeUpdate,
+                                  onHorizontalDragEnd: _onSwipeEnd,
+                                  onHorizontalDragCancel: _onSwipeCancel,
+                                  child: FlipCard(
+                                    key: ValueKey<String>(_queue[_index].id),
+                                    flipped: _flipped,
+                                    onTap: _toggleFlip,
+                                    front:
+                                        _ReviewFront(question: _queue[_index]),
+                                    back: _ReviewBack(
+                                      question: _queue[_index],
+                                      onGrade: _gradeByButton,
+                                      enabled: !_grading && !_releasing,
+                                      scrollController: _answerScroll,
+                                      drag: _VerticalDragCallbacks(
+                                        onStart: _onSwipeStart,
+                                        onUpdate: _onSwipeUpdate,
+                                        onEnd: _onSwipeEnd,
+                                        onCancel: _onSwipeCancel,
+                                        shouldAccept: _shouldStealVertical,
+                                      ),
                                     ),
                                   ),
                                 ),

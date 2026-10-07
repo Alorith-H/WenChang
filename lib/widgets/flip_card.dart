@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// A cross-fade card (1s, easeInOut): tapping swaps the faces with a
+/// A cross-fade card (400ms, easeInOut): tapping swaps the faces with a
 /// visible Fade + a slight 10px slide — the outgoing face drifts aside while
 /// the incoming one settles into place — and no 3D rotation.
 ///
@@ -29,7 +29,7 @@ class FlipCard extends StatefulWidget {
     required this.flipped,
     required this.front,
     required this.back,
-    this.duration = const Duration(milliseconds: 1000),
+    this.duration = const Duration(milliseconds: 400),
     this.onTap,
   });
 
@@ -83,6 +83,9 @@ class _FlipCardState extends State<FlipCard>
       behavior: HitTestBehavior.opaque,
       child: AnimatedBuilder(
         animation: _controller,
+        // builder 只读 _controller.value 并重建 Opacity/Transform 这几个
+        // 纯 RenderObject 属性节点；widget.front/back 引用逐帧不变，
+        // face 子树不 rebuild、不 relayout。
         builder: (context, _) {
           final t = _controller.value;
           // Past the midpoint the incoming face owns the interaction.
@@ -93,13 +96,19 @@ class _FlipCardState extends State<FlipCard>
             children: [
               // Incoming face underneath: fades in from the right while it
               // settles (from the left when the flip is undone).
+              // RepaintBoundary 在动画节点（Opacity/Transform）内侧、face
+              // 外侧：face 的位图只栅格化一次，动画每帧只对缓存纹理做
+              // 透明度混合——满文字面不再逐帧重绘（掉帧修复）。
               IgnorePointer(
                 ignoring: !showBack,
                 child: Opacity(
                   opacity: t,
                   child: Transform.translate(
                     offset: Offset(slide * (1 - t), 0),
-                    child: widget.back,
+                    child: RepaintBoundary(
+                      key: const ValueKey<String>('flip-back-boundary'),
+                      child: widget.back,
+                    ),
                   ),
                 ),
               ),
@@ -111,7 +120,10 @@ class _FlipCardState extends State<FlipCard>
                   opacity: 1 - t,
                   child: Transform.translate(
                     offset: Offset(-slide * t, 0),
-                    child: widget.front,
+                    child: RepaintBoundary(
+                      key: const ValueKey<String>('flip-front-boundary'),
+                      child: widget.front,
+                    ),
                   ),
                 ),
               ),

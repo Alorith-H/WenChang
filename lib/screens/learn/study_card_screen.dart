@@ -56,7 +56,7 @@ class _StudyCardScreenState extends State<StudyCardScreen> {
   final Set<String> _autoArmed = <String>{};
 
   /// Pages opened by the auto-flip (they use a shorter, "短暂" fade than
-  /// the manual 1s flip) until the user interacts with them.
+  /// the manual 400ms flip) until the user interacts with them.
   final Set<int> _autoOpened = <int>{};
 
   late final PageController _pageController;
@@ -139,7 +139,7 @@ class _StudyCardScreenState extends State<StudyCardScreen> {
   /// 挂载与翻开必须**错开一帧**：滑页时新页往往本帧才构建，若此刻直接把
   /// `_flipped[page]` 置 true，FlipCard 的 controller 初值就等于 1 ——
   /// 根本没有动画（用户看到的"瞬间切换"）。推迟到 post-frame 再翻，
-  /// 卡片已带着 false 挂载，下一帧 didUpdateWidget 才能真正跑 350ms 渐显。
+  /// 卡片已带着 false 挂载，下一帧 didUpdateWidget 才能真正跑 250ms 渐显。
   void _autoOpenIfArmed(int page) {
     final card = _cards[page];
     if (_flipped[page]) return; // 滑回已看过的：保持翻开
@@ -170,7 +170,7 @@ class _StudyCardScreenState extends State<StudyCardScreen> {
   /// first sub-card open arms auto-open for the rest of the section.
   void _toggleFlip(int page) {
     setState(() => _flipped[page] = !_flipped[page]);
-    // Manual interaction → use the full 1s flip, not the auto fade.
+    // Manual interaction → use the full 400ms flip, not the auto fade.
     _autoOpened.remove(page);
     if (!_flipped[page]) return;
     final card = _cards[page];
@@ -273,10 +273,10 @@ class _StudyCardScreenState extends State<StudyCardScreen> {
                   child: FlipCard(
                     key: ValueKey<String>('${card.section.id}#${card.index}'),
                     flipped: _flipped[i],
-                    // 自动翻开是"短暂渐显"（350ms），手动翻面保持 1s。
+                    // 自动翻开是"短暂渐显"（250ms），手动翻面 400ms。
                     duration: _autoOpened.contains(i)
-                        ? const Duration(milliseconds: 350)
-                        : const Duration(milliseconds: 1000),
+                        ? const Duration(milliseconds: 250)
+                        : const Duration(milliseconds: 400),
                     onTap: () {
                       // Tapping a peeking neighbour slides to it; only the
                       // current card flips in place.
