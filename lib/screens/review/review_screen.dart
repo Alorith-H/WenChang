@@ -8,6 +8,7 @@ import '../../models/models.dart';
 import '../../services/content_overrides.dart';
 import '../../services/srs_logic.dart';
 import '../../services/srs_service.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/answer_spans.dart';
 import '../../widgets/correction_sheet.dart';
 import '../../widgets/flip_card.dart';
@@ -648,12 +649,10 @@ class _SwipeHintLayer extends StatelessWidget {
 
   const _SwipeHintLayer({required this.offset});
 
-  static const _good = Color(0xFF3E7A52);
-  static const _again = Color(0xFFB03A2E);
-  static const _hard = Color(0xFF9A6B12);
-
   @override
   Widget build(BuildContext context) {
+    // 评价三色是语义填充色（深浅同值，白字徽标压面始终可读）。
+    final pal = semanticPaletteOf(context);
     final dx = offset.dx;
     final dy = offset.dy;
     final horizontal = dx.abs() >= dy.abs();
@@ -667,7 +666,7 @@ class _SwipeHintLayer extends StatelessWidget {
     final Alignment gradientEnd;
 
     if (horizontal && dx.abs() > 8) {
-      color = dx > 0 ? _good : _again;
+      color = dx > 0 ? pal.good : pal.again;
       icon = dx > 0 ? Icons.check_rounded : Icons.close_rounded;
       label = dx > 0 ? '熟练' : '忘记';
       badgeAlign = dx > 0 ? Alignment.centerRight : Alignment.centerLeft;
@@ -679,7 +678,7 @@ class _SwipeHintLayer extends StatelessWidget {
       gradientBegin = dx > 0 ? Alignment.centerLeft : Alignment.centerRight;
       gradientEnd = dx > 0 ? Alignment.centerRight : Alignment.centerLeft;
     } else if (!horizontal && dy < -8) {
-      color = _hard;
+      color = pal.hard;
       icon = Icons.priority_high_rounded;
       label = '生疏';
       badgeAlign = Alignment.topCenter;
@@ -758,13 +757,7 @@ class _ReviewFront extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: paperShadowOf(context),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
@@ -836,6 +829,7 @@ class _ReviewBack extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final pal = semanticPaletteOf(context);
     final baseStyle = const TextStyle(fontSize: 18, height: 1.8);
 
     return Container(
@@ -843,13 +837,7 @@ class _ReviewBack extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: paperShadowOf(context),
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -913,13 +901,14 @@ class _ReviewBack extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           // 三个带色药丸：熟练=绿、生疏=琥珀、忘记=红，取代通用按钮。
+          // 语义填充色（SemanticPalette），深浅两版白字都可读。
           Row(
             children: [
               Expanded(
                 child: _GradePill(
                   icon: Icons.check_rounded,
                   label: '熟练',
-                  color: const Color(0xFF3E7A52),
+                  color: pal.good,
                   onPressed: enabled ? () => onGrade(Grade.good) : null,
                 ),
               ),
@@ -928,7 +917,7 @@ class _ReviewBack extends StatelessWidget {
                 child: _GradePill(
                   icon: Icons.help_outline_rounded,
                   label: '生疏',
-                  color: const Color(0xFF9A6B12),
+                  color: pal.hard,
                   onPressed: enabled ? () => onGrade(Grade.hard) : null,
                 ),
               ),
@@ -937,7 +926,7 @@ class _ReviewBack extends StatelessWidget {
                 child: _GradePill(
                   icon: Icons.close_rounded,
                   label: '忘记',
-                  color: const Color(0xFFB03A2E),
+                  color: pal.again,
                   onPressed: enabled ? () => onGrade(Grade.again) : null,
                 ),
               ),

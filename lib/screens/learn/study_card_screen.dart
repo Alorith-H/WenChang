@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app_scope.dart';
 import '../../models/models.dart';
 import '../../services/section_split.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/content_views.dart';
 import '../../widgets/correction_sheet.dart';
 import '../../widgets/flip_card.dart';
@@ -325,13 +326,7 @@ class _CardShell extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: paperShadowOf(context),
       ),
       clipBehavior: Clip.antiAlias,
       child: child,

@@ -7,8 +7,12 @@ class ProgressRing extends StatelessWidget {
   final double progress;
   final double size;
   final double strokeWidth;
-  final Color color;
-  final Color track;
+
+  /// 环弧颜色；null → 跟随主题主色（深浅两版 ColorScheme 自适应）。
+  final Color? color;
+
+  /// 环跑道颜色；null → 跟随主题进度槽色。
+  final Color? track;
 
   /// 居中显示在环内的内容（百分比、x/总 等）。
   final Widget? child;
@@ -19,20 +23,21 @@ class ProgressRing extends StatelessWidget {
     required this.size,
     required this.child,
     this.strokeWidth = 6,
-    this.color = const Color(0xFF9B3A2C),
-    this.track = const Color(0xFFE1D8C4),
+    this.color,
+    this.track,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: size,
       height: size,
       child: CustomPaint(
         painter: _RingPainter(
           progress: progress.clamp(0.0, 1.0),
-          color: color,
-          track: track,
+          color: color ?? scheme.primary,
+          track: track ?? scheme.surfaceContainerHighest,
           strokeWidth: strokeWidth,
         ),
         child: Center(child: child),

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../theme/app_theme.dart';
 
 /// The red used for inline 红笔考点 runs — exactly the C00000 red of the
-/// original Word document (contrast is sufficient on light card surfaces).
+/// original Word document on light card surfaces. 深色模式下换
+/// [SemanticPalette.wordRed] 的提亮朱红变体（见 [semanticPaletteOf]），
+/// 深灰褐底上的对比度依旧充足。
 const Color kWordRed = Color(0xFFC00000);
 
 /// One bullet line. When the bullet carries Word-original [Bullet.segs],
@@ -18,6 +21,7 @@ class BulletRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final wordRed = semanticPaletteOf(context).wordRed;
     final style = TextStyle(
       fontSize: 15,
       height: 1.7,
@@ -35,7 +39,7 @@ class BulletRow extends StatelessWidget {
             for (final seg in segs)
               TextSpan(
                 text: seg.text,
-                style: seg.red ? TextStyle(color: kWordRed) : null,
+                style: seg.red ? TextStyle(color: wordRed) : null,
               ),
           ],
         ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app_scope.dart';
 import '../../services/srs_service.dart';
+import '../../theme/app_theme.dart';
 import 'practice_record_detail_screen.dart';
 
 /// 练习记录列表：每行 = 日期 + 正确率 + 题数（最新在前），
@@ -124,7 +125,7 @@ class _HistoryTile extends StatelessWidget {
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: percent >= 80
-                      ? const Color(0xFF3E7A52)
+                      ? semanticPaletteOf(context).goodText
                       : (percent >= 60
                           ? scheme.onSurfaceVariant
                           : scheme.error),

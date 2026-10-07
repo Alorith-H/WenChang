@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_scope.dart';
 import '../services/srs_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/font_scale_sheet.dart';
 import '../widgets/progress_ring.dart';
 
@@ -75,13 +76,7 @@ class _PaperCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: paperShadowOf(context),
       ),
       padding: const EdgeInsets.all(20),
       child: child,
@@ -116,13 +111,11 @@ class _DistributionCard extends StatelessWidget {
 
   const _DistributionCard({required this.dist, required this.total});
 
-  static const matureColor = Color(0xFF9B3A2C);
-  static const reviewingColor = Color(0xFF9A6B12);
-  static const unseenColor = Color(0xFFB4A992);
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 深浅双值：浅色沿用原三色，深色整体提亮（语义色见 SemanticPalette）。
+    final pal = semanticPaletteOf(context);
     final progress = total > 0 ? (dist.mature / total).clamp(0.0, 1.0) : 0.0;
     final percent = total > 0 ? '${(progress * 100).round()}%' : '—';
 
@@ -138,18 +131,18 @@ class _DistributionCard extends StatelessWidget {
                 progress: progress,
                 size: 116,
                 strokeWidth: 10,
-                color: matureColor,
+                color: pal.mature,
                 track: scheme.surfaceContainerHighest,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       percent,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 24,
                         height: 1.1,
                         fontWeight: FontWeight.w900,
-                        color: matureColor,
+                        color: pal.mature,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -169,21 +162,21 @@ class _DistributionCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _DistRow(
-                      color: matureColor,
+                      color: pal.mature,
                       label: '已标熟',
                       count: dist.mature,
                       total: total,
                     ),
                     const SizedBox(height: 10),
                     _DistRow(
-                      color: reviewingColor,
+                      color: pal.reviewing,
                       label: '复习中',
                       count: dist.reviewing,
                       total: total,
                     ),
                     const SizedBox(height: 10),
                     _DistRow(
-                      color: unseenColor,
+                      color: pal.unseen,
                       label: '未见面',
                       count: dist.unseen,
                       total: total,
@@ -202,14 +195,14 @@ class _DistributionCard extends StatelessWidget {
               child: Row(
                 children: [
                   if (dist.mature > 0)
-                    Expanded(flex: dist.mature, child: _BarFill(matureColor)),
+                    Expanded(flex: dist.mature, child: _BarFill(pal.mature)),
                   if (dist.reviewing > 0)
                     Expanded(
                       flex: dist.reviewing,
-                      child: _BarFill(reviewingColor),
+                      child: _BarFill(pal.reviewing),
                     ),
                   if (dist.unseen > 0)
-                    Expanded(flex: dist.unseen, child: _BarFill(unseenColor)),
+                    Expanded(flex: dist.unseen, child: _BarFill(pal.unseen)),
                   if (dist.total == 0)
                     Expanded(child: _BarFill(scheme.surfaceContainerHighest)),
                 ],
@@ -396,7 +389,7 @@ class _StreakCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    const fire = Color(0xFFC2662B);
+    final fire = semanticPaletteOf(context).fire;
     return _PaperCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -405,7 +398,7 @@ class _StreakCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.local_fire_department_rounded,
                 size: 26,
                 color: fire,

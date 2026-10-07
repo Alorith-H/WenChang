@@ -10,6 +10,7 @@ import '../../services/custom_questions.dart';
 import '../../services/favorites.dart';
 import '../../services/srs_logic.dart';
 import '../../services/srs_service.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/answer_spans.dart';
 import '../../widgets/correction_sheet.dart';
 import '../../widgets/flip_card.dart';
@@ -649,13 +650,7 @@ class _PracticeFront extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: paperShadowOf(context),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
@@ -717,6 +712,7 @@ class _PracticeBack extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final pal = semanticPaletteOf(context);
     final baseStyle = const TextStyle(fontSize: 18, height: 1.8);
 
     return Container(
@@ -724,13 +720,7 @@ class _PracticeBack extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: paperShadowOf(context),
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -783,7 +773,7 @@ class _PracticeBack extends StatelessWidget {
                 child: _GradePill(
                   icon: Icons.close_rounded,
                   label: '不会',
-                  color: const Color(0xFFB03A2E),
+                  color: pal.again,
                   onPressed: enabled ? () => onGrade(false) : null,
                 ),
               ),
@@ -792,7 +782,7 @@ class _PracticeBack extends StatelessWidget {
                 child: _GradePill(
                   icon: Icons.check_rounded,
                   label: '会',
-                  color: const Color(0xFF3E7A52),
+                  color: pal.good,
                   onPressed: enabled ? () => onGrade(true) : null,
                 ),
               ),
@@ -860,16 +850,15 @@ class _SwipeHintLayer extends StatelessWidget {
 
   const _SwipeHintLayer({required this.offset});
 
-  static const _know = Color(0xFF3E7A52);
-  static const _dontKnow = Color(0xFFB03A2E);
-
   @override
   Widget build(BuildContext context) {
+    // 评价两色是语义填充色（深浅同值，白字徽标压面始终可读）。
+    final pal = semanticPaletteOf(context);
     final dx = offset.dx;
     final dy = offset.dy;
     if (dx.abs() < dy.abs() || dx.abs() <= 8) return const SizedBox.shrink();
 
-    final color = dx > 0 ? _know : _dontKnow;
+    final color = dx > 0 ? pal.good : pal.again;
     final icon = dx > 0 ? Icons.check_rounded : Icons.close_rounded;
     final label = dx > 0 ? '会' : '不会';
     final badgeAlign = dx > 0 ? Alignment.centerRight : Alignment.centerLeft;

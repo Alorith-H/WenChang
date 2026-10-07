@@ -7,23 +7,34 @@ import 'services/content_overrides.dart';
 import 'services/custom_questions.dart';
 import 'services/favorites.dart';
 import 'services/srs_service.dart';
+import 'theme/app_theme.dart';
 
-void main() {
-  runApp(const WenchangApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // 深色模式设置先于首帧读出（SharedPreferences 已在插件通道就绪），
+  // 冷启动第一帧就是用户选的 跟随系统 / 浅色 / 深色，不闪白。
+  final themeMode = themeModeFromId(await loadThemeModeId());
+  runApp(WenchangApp(initialThemeMode: themeMode));
 }
 
 class WenchangApp extends StatelessWidget {
-  const WenchangApp({super.key});
+  /// 冷启动时从 SharedPreferences 读到的深色模式（[main] 里 await）。
+  /// 直接 pumpWidget 的调用方不传 → 跟随系统。
+  final ThemeMode? initialThemeMode;
+
+  const WenchangApp({super.key, this.initialThemeMode});
 
   @override
   Widget build(BuildContext context) {
-    return const _Bootstrap();
+    return _Bootstrap(initialThemeMode: initialThemeMode);
   }
 }
 
 /// Loads data + persisted SRS state once, then hands them to [AppScope].
 class _Bootstrap extends StatefulWidget {
-  const _Bootstrap();
+  final ThemeMode? initialThemeMode;
+
+  const _Bootstrap({this.initialThemeMode});
 
   @override
   State<_Bootstrap> createState() => _BootstrapState();
@@ -63,52 +74,31 @@ class _BootstrapState extends State<_Bootstrap> {
   /// every route: cards, lists, review stems. It is capped at 1.3 anyway,
   /// which keeps AppBar titles from being blown up.
   ///
-  /// [seed] is the selected 主题色 accent (default 朱红): it drives only the
-  /// accent roles — paper surfaces, ink text and the hairlines stay fixed,
+  /// [preset] is the selected 主题色 (default 朱红): it drives both the
+  /// light and dark ColorScheme (its two seeds — see [buildColorScheme]),
   /// and the launcher icon is never touched.
+  ///
+  /// [themeMode]（跟随系统 / 浅色 / 深色，议题 #6）同时接进 MaterialApp 的
+  /// `themeMode`，深色走 [buildThemeData] 的深灰褐纸感底。
   ///
   /// The visual direction is "文学笔记本": a warm paper ground, near-black
   /// ink text and the accent used only as point color (key numbers,
   /// highlights, primary actions) — deliberately away from stock M3's
-  /// tinted-surface look.
+  /// tinted-surface look. 深色是同一本笔记本的夜间版：深灰褐纸底、
+  /// 暖白墨字、提亮点睛。
   Widget _app({
     required Widget home,
+    required ThemeMode themeMode,
     double? textScale,
-    Color seed = const Color(0xFF9B3A2C), // 朱红（默认主题色）
+    ThemePreset? preset, // null → 朱红（默认主题色）
   }) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: seed,
-      brightness: Brightness.light,
-    ).copyWith(
-      // 点睛色 — used at full strength only for accents / primary actions.
-      primary: seed,
-      onPrimary: const Color(0xFFFFF7F1),
-      primaryContainer: Color.lerp(seed, const Color(0xFFFFFDF7), 0.82)!,
-      onPrimaryContainer: Color.lerp(seed, const Color(0xFF000000), 0.45)!,
-      secondary: const Color(0xFF7A6A4F),
-      secondaryContainer: const Color(0xFFEDE2CB),
-      onSecondaryContainer: const Color(0xFF4A3D26),
-      // 纸墨 palette: warm paper surfaces, ink text, no purple M3 tint.
-      surface: const Color(0xFFF7F2E6), // 暖白纸
-      onSurface: const Color(0xFF221E17), // 近黑墨
-      onSurfaceVariant: const Color(0xFF6E6455),
-      outline: const Color(0xFFB4A992),
-      outlineVariant: const Color(0xFFE3DAC7), // 1px hairline
-      surfaceDim: const Color(0xFFEDE6D6),
-      surfaceBright: const Color(0xFFFFFDF7),
-      surfaceContainerLowest: const Color(0xFFFFFDF7), // 卡片纸
-      surfaceContainerLow: const Color(0xFFF2ECDE), // 次级行卡
-      surfaceContainer: const Color(0xFFEDE6D6),
-      surfaceContainerHigh: const Color(0xFFE7DFCD),
-      surfaceContainerHighest: const Color(0xFFE1D8C4), // 进度槽
-      inverseSurface: const Color(0xFF2C271F),
-      onInverseSurface: const Color(0xFFF7F2E6),
-      // Elevation must never wash the paper purple.
-      surfaceTint: Colors.transparent,
-    );
+    final active = preset ?? kThemePresets[0];
     return MaterialApp(
       title: '文常卡片',
       debugShowCheckedModeBanner: false,
+      themeMode: themeMode,
+      theme: buildThemeData(buildColorScheme(active, Brightness.light)),
+      darkTheme: buildThemeData(buildColorScheme(active, Brightness.dark)),
       // 字号设置总控：统一改写 MediaQuery 的 textScaler，全局生效。
       builder: textScale == null
           ? null
@@ -119,72 +109,23 @@ class _BootstrapState extends State<_Bootstrap> {
                 child: child ?? const SizedBox.shrink(),
               );
             },
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: scheme,
-        scaffoldBackgroundColor: scheme.surface,
-        appBarTheme: AppBarTheme(
-          backgroundColor: scheme.surface,
-          foregroundColor: scheme.onSurface,
-          surfaceTintColor: Colors.transparent,
-          shadowColor: Colors.transparent,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          centerTitle: false,
-          titleTextStyle: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1,
-            color: scheme.onSurface,
-          ),
-        ),
-        dividerTheme: const DividerThemeData(
-          color: Color(0xFFE3DAC7),
-          thickness: 1,
-          space: 1,
-        ),
-        dialogTheme: DialogThemeData(
-          backgroundColor: scheme.surfaceContainerLowest,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          ),
-        ),
-        inputDecorationTheme: const InputDecorationTheme(
-          hintStyle: TextStyle(fontSize: 15),
-        ),
-        textTheme: Typography.blackMountainView.apply(
-          bodyColor: scheme.onSurface,
-          displayColor: scheme.onSurface,
-        ),
-      ),
       home: home,
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // 加载期间用冷启动读出的模式；数据就绪后跟随 SrsService 里可改的值。
+    final initialMode =
+        widget.initialThemeMode == null
+            ? ThemeMode.system
+            : widget.initialThemeMode!;
     return FutureBuilder<_Boot>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return _app(
+            themeMode: initialMode,
             home: const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             ),
@@ -192,6 +133,7 @@ class _BootstrapState extends State<_Bootstrap> {
         }
         if (snapshot.hasError || !snapshot.hasData) {
           return _app(
+            themeMode: initialMode,
             home: Scaffold(
               body: Center(
                 child: Column(
@@ -210,8 +152,8 @@ class _BootstrapState extends State<_Bootstrap> {
           );
         }
         final boot = snapshot.data!;
-        // Rebuild (and re-apply the text scale / theme color) only when the
-        // 字号 or 主题色 changes, not on every grade.
+        // Rebuild (and re-apply the text scale / theme color / theme mode)
+        // only when the 字号、主题色 or 深色模式 changes, not on every grade.
         return AppScope(
           data: boot.data,
           srs: boot.srs,
@@ -222,11 +164,13 @@ class _BootstrapState extends State<_Bootstrap> {
             listenable: Listenable.merge([
               boot.srs.fontScaleListenable,
               boot.srs.themeListenable,
+              boot.srs.themeModeListenable,
             ]),
             builder: (context, _) => _app(
+              themeMode: themeModeFromId(boot.srs.themeMode),
               home: const HomeScreen(),
               textScale: boot.srs.fontScale,
-              seed: boot.srs.themePreset.seed,
+              preset: boot.srs.themePreset,
             ),
           ),
         );

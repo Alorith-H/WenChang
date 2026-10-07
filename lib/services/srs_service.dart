@@ -22,8 +22,27 @@ const _kDailyKey = 'daily_answers';
 const _kActiveDaysKey = 'active_days';
 const _kFontScaleKey = 'font_scale';
 const _kThemeColorKey = 'theme_color';
+const kThemeModeKey = 'theme_mode';
 const _kReviewShuffleKey = 'review_shuffle';
 const _kPracticeKey = 'practice_history';
+
+/// 深色模式三态的持久化 id（SharedPreferences `theme_mode`）：
+/// 跟随系统（默认）/ 浅色 / 深色。
+const kThemeModeIds = <String>['system', 'light', 'dark'];
+const kThemeModeDefault = 'system';
+
+/// 冷启动读取持久化的 `theme_mode`（缺省 / 非法值一律按跟随系统）——
+/// 在 runApp 之前 await 它，保证深色设置从第一帧就生效。
+Future<String> loadThemeModeId() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(kThemeModeKey);
+    if (raw != null && kThemeModeIds.contains(raw)) return raw;
+  } catch (_) {
+    // 读失败按默认走，绝不拦启动。
+  }
+  return kThemeModeDefault;
+}
 
 /// Allowed font-size steps (textScale), paired with their labels.
 const kFontScaleSteps = <double>[0.9, 1.0, 1.15, 1.3];
@@ -31,23 +50,26 @@ const kFontScaleLabels = <String>['小', '标准', '大', '特大'];
 
 /// One of the six preset theme accents. The seed drives the app-wide
 /// ColorScheme (MaterialApp theme rebuild); only in-app colors change —
-/// never the launcher icon.
+/// never the launcher icon. [seedDark] 是深色模式下同色系的提亮变体
+/// （议题 #6「6 色各配深色版」），保证深灰褐底上的对比度。
 class ThemePreset {
   final String id;
   final String name;
   final Color seed;
+  final Color seedDark;
 
-  const ThemePreset(this.id, this.name, this.seed);
+  const ThemePreset(this.id, this.name, this.seed, this.seedDark);
 }
 
 /// 预设主题色：朱红（默认）、靛蓝、松绿、黛紫、暖橙、石墨。
+/// 每色带一个深色变体（seedDark）：同色相提亮，深底可读。
 const kThemePresets = <ThemePreset>[
-  ThemePreset('vermillion', '朱红', Color(0xFF9B3A2C)),
-  ThemePreset('indigo', '靛蓝', Color(0xFF31478C)),
-  ThemePreset('pine', '松绿', Color(0xFF2F6B4F)),
-  ThemePreset('aubergine', '黛紫', Color(0xFF5F4180)),
-  ThemePreset('amber', '暖橙', Color(0xFFB3651F)),
-  ThemePreset('graphite', '石墨', Color(0xFF4C5157)),
+  ThemePreset('vermillion', '朱红', Color(0xFF9B3A2C), Color(0xFFDB6B58)),
+  ThemePreset('indigo', '靛蓝', Color(0xFF31478C), Color(0xFF8AA0E0)),
+  ThemePreset('pine', '松绿', Color(0xFF2F6B4F), Color(0xFF63B48F)),
+  ThemePreset('aubergine', '黛紫', Color(0xFF5F4180), Color(0xFFAC8BD6)),
+  ThemePreset('amber', '暖橙', Color(0xFFB3651F), Color(0xFFE09A55)),
+  ThemePreset('graphite', '石墨', Color(0xFF4C5157), Color(0xFFA3AAB3)),
 ];
 
 /// 学习模式上次停留的位置：章 → 板块 → 板块内页码。
@@ -192,6 +214,10 @@ class SrsService extends ChangeNotifier {
   /// Index into [kThemePresets] (0 = 朱红, the default).
   int _themeIndex;
 
+  /// 深色模式三态 id（`system|light|dark`，见 [kThemeModeIds]），持久化在
+  /// SharedPreferences `theme_mode`，冷启动生效。
+  String _themeMode;
+
   /// 复习随机: true = a new review session shuffles, false = due order.
   bool _reviewShuffle;
 
@@ -217,6 +243,10 @@ class SrsService extends ChangeNotifier {
   /// its theme without reacting to every grade.
   final ValueNotifier<ThemePreset> themeListenable;
 
+  /// Notifies only when [themeMode] changes, so MaterialApp can rebuild its
+  /// themeMode (跟随系统 / 浅色 / 深色) without reacting to every grade.
+  final ValueNotifier<String> themeModeListenable;
+
   SrsService._(
     this._prefs,
     this._states,
@@ -230,9 +260,11 @@ class SrsService extends ChangeNotifier {
     this._practice,
     this._fontScale,
     this._themeIndex,
+    this._themeMode,
     this._reviewShuffle,
   ) : fontScaleListenable = ValueNotifier(_fontScale),
-      themeListenable = ValueNotifier(kThemePresets[_themeIndex]);
+      themeListenable = ValueNotifier(kThemePresets[_themeIndex]),
+      themeModeListenable = ValueNotifier(_themeMode);
 
   static Future<SrsService> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -247,6 +279,7 @@ class SrsService extends ChangeNotifier {
     final practice = <PracticeRecord>[];
     var fontScale = 1.0;
     var themeIndex = 0;
+    var themeMode = kThemeModeDefault;
     var reviewShuffle = true;
 
     try {
@@ -373,6 +406,13 @@ class SrsService extends ChangeNotifier {
     }
 
     try {
+      final mode = prefs.getString(kThemeModeKey);
+      if (mode != null && kThemeModeIds.contains(mode)) themeMode = mode;
+    } catch (_) {
+      // Same as above.
+    }
+
+    try {
       final shuffle = prefs.getBool(_kReviewShuffleKey);
       if (shuffle != null) reviewShuffle = shuffle;
     } catch (_) {
@@ -448,6 +488,7 @@ class SrsService extends ChangeNotifier {
       practice,
       fontScale,
       themeIndex,
+      themeMode,
       reviewShuffle,
     );
   }
@@ -456,6 +497,7 @@ class SrsService extends ChangeNotifier {
   void dispose() {
     fontScaleListenable.dispose();
     themeListenable.dispose();
+    themeModeListenable.dispose();
     super.dispose();
   }
 
@@ -584,6 +626,22 @@ class SrsService extends ChangeNotifier {
       await _prefs.setString(_kThemeColorKey, kThemePresets[index].id);
     } catch (_) {
       // Best effort: a lost theme must never crash the UI.
+    }
+  }
+
+  /// 深色模式三态 id（`system|light|dark`，见 [kThemeModeIds]）。
+  String get themeMode => _themeMode;
+
+  /// 切换深色模式（跟随系统 / 浅色 / 深色）：更新 [themeModeListenable]
+  /// （MaterialApp 监听它换 themeMode）并持久化 `theme_mode`，冷启动生效。
+  Future<void> setThemeMode(String mode) async {
+    if (!kThemeModeIds.contains(mode) || mode == _themeMode) return;
+    _themeMode = mode;
+    themeModeListenable.value = mode;
+    try {
+      await _prefs.setString(kThemeModeKey, mode);
+    } catch (_) {
+      // Best effort: a lost theme mode must never crash the UI.
     }
   }
 

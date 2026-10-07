@@ -1,11 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../app_scope.dart';
 import '../data/quotes.dart';
 import '../models/models.dart';
 import '../services/srs_logic.dart';
 import '../services/srs_service.dart';
+import '../services/update_check.dart';
+import '../theme/app_theme.dart';
 import '../widgets/progress_ring.dart';
+import '../widgets/update_dialog.dart';
 import 'learn/chapter_list_screen.dart';
 import 'learn/section_list_screen.dart';
 import 'learn/study_card_screen.dart';
@@ -33,10 +39,52 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 下次冷启动随机换。纯装饰，不进题库。
   late final Quote _quote;
 
+  /// 冷启动静默检查发现的新版本（null = 无更新 / 检查失败 / 已被忽略）。
+  /// 只有发现新版本才置位，主页顶部显示可关闭的横幅（议题 #5）。
+  ReleaseInfo? _updateBanner;
+
   @override
   void initState() {
     super.initState();
     _quote = nextQuote();
+    // 首页就绪（首帧后）后台静默检查一次更新：8s 超时、失败无感、
+    // 不阻塞启动 —— 只有发现新版本才 setState 立横幅。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_silentUpdateCheck());
+    });
+  }
+
+  /// 每次冷启动一次的静默更新检查：任何一步失败都直接放弃（无感）。
+  Future<void> _silentUpdateCheck() async {
+    if (!mounted) return;
+    final release = await fetchLatestRelease(); // ≤8s，失败 → null
+    if (release == null || !mounted) return;
+    String local;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      local = info.version;
+    } catch (_) {
+      return; // 拿不到本地版本 → 不打扰
+    }
+    if (!mounted) return;
+    final dismissed = await getDismissedVersion();
+    if (!mounted) return;
+    if (!shouldShowBanner(
+      remote: release.version,
+      local: local,
+      dismissed: dismissed,
+    )) {
+      return;
+    }
+    setState(() => _updateBanner = release);
+  }
+
+  /// 横幅关闭：记下已忽略的版本（同版本下次冷启动不再出现）。
+  Future<void> _dismissUpdateBanner() async {
+    final release = _updateBanner;
+    if (release == null) return;
+    await setDismissedVersion(release.version);
+    if (mounted) setState(() => _updateBanner = null);
   }
 
   @override
@@ -68,6 +116,16 @@ class _HomeScreenState extends State<HomeScreen> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
               children: [
+                // 发现新版本的可关闭横幅（议题 #5，仅新版本出现）：
+                // 点开与「检查更新」同一个更新对话框，关闭记忆该版本。
+                if (_updateBanner != null) ...[
+                  _UpdateBanner(
+                    label: '发现新 ${_updateBanner!.tagName} →',
+                    onTap: () => showUpdateDialog(context, _updateBanner!),
+                    onDismiss: _dismissUpdateBanner,
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -333,13 +391,7 @@ class _MainEntryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: paperShadowOf(context),
       ),
       child: Material(
         color: Colors.transparent,
@@ -597,10 +649,10 @@ class _StreakLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    const fire = Color(0xFFC2662B);
+    final fire = semanticPaletteOf(context).fire;
     return Row(
       children: [
-        const Icon(Icons.local_fire_department_rounded, size: 18, color: fire),
+        Icon(Icons.local_fire_department_rounded, size: 18, color: fire),
         const SizedBox(width: 6),
         Text(
           '连续 $streak 天',
@@ -676,6 +728,66 @@ class _Hairline extends StatelessWidget {
       height: 30,
       margin: const EdgeInsets.symmetric(horizontal: 12),
       color: color,
+    );
+  }
+}
+
+/// 主页顶部的「发现新 vX.Y.Z →」横幅（议题 #5）：整行可点开更新对话框，
+/// 右侧 ✕ 关闭并记住该版本。主色浅底 + 点睛字，深浅两版自适应。
+class _UpdateBanner extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  const _UpdateBanner({
+    required this.label,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.primaryContainer,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 16, right: 4, top: 4, bottom: 4),
+          child: Row(
+            children: [
+              Icon(
+                Icons.new_releases_rounded,
+                size: 18,
+                color: scheme.onPrimaryContainer,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  Icons.close_rounded,
+                  size: 18,
+                  color: scheme.onPrimaryContainer,
+                ),
+                tooltip: '忽略此版本',
+                visualDensity: VisualDensity.compact,
+                onPressed: onDismiss,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
