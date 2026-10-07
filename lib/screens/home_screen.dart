@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app_scope.dart';
+import '../data/quotes.dart';
 import '../models/models.dart';
+import '../services/srs_logic.dart';
 import '../services/srs_service.dart';
 import '../widgets/progress_ring.dart';
 import 'learn/chapter_list_screen.dart';
@@ -14,13 +16,28 @@ import 'source/source_screen.dart';
 import 'stats_screen.dart';
 
 /// 首页："文学笔记本"式的版面 —
-/// 顶部大标题 + 一张主入口大卡（今日待复习 / 继续学习）+ 三张轻量次级
-/// 行卡（学习 / 资料 / 习题）+ 杂志式统计数字行（带已标熟进度环与连续打卡
-/// 天数）。朱红只出现
+/// 顶部大标题（下挂一句随机名言名句）+ 一张主入口大卡（今日待复习 /
+/// 继续学习）+ 三张轻量次级行卡（学习 / 资料 / 习题）+ 杂志式统计数字行
+/// （带已标熟进度环与连续打卡天数）。朱红只出现
 /// 在数字与主行动上，底色全部走纸墨色阶，行与行之间靠留白和发丝线分隔，
 /// 没有三张同款 tile。
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  /// 标题下的随机名句：进主页（冷启动）时取一次，之后的重建沿用同一句；
+  /// 下次冷启动随机换。纯装饰，不进题库。
+  late final Quote _quote;
+
+  @override
+  void initState() {
+    super.initState();
+    _quote = nextQuote();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,11 +50,12 @@ class HomeScreen extends StatelessWidget {
         child: ListenableBuilder(
           listenable: srs,
           builder: (context, _) {
-            // 首页数字必须与复习页进度一致：存在未完成会话时直接显示
-            // 会话剩余数，否则用（修复后的）buildReviewQueue —— 答完归零。
+            // 首页数字必须与复习页进度一致：存在未完成会话时按**去重口径**
+            // 显示会话剩余（忘记重排出队尾的副本已答过，不计入剩余 ——
+            // 「已完成」不因重排提前/推后），否则用 buildReviewQueue。
             final session = srs.reviewSession;
             final dueCount = session != null
-                ? session.ids.length - session.index
+                ? distinctRemaining(session.ids, session.index)
                 : buildReviewQueue(data, srs).length;
             final learned = srs.learnedToday().length;
             final total = data.totalSections;
@@ -75,22 +93,37 @@ class HomeScreen extends StatelessWidget {
                               const _Seal(),
                             ],
                           ),
-                          if (data.doc.subtitle.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              data.doc.subtitle.join(' · '),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.copyWith(
-                                    fontSize: 13,
-                                    height: 1.6,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
+                          // 随机名言名句（装饰性副标题，取自内置列表）：
+                          // 灰字风格与原副标题一致，稍大一点、带引号，
+                          // 出处以更淡的样式跟在句后。
+                          const SizedBox(height: 4),
+                          Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(text: '「${_quote.text}」'),
+                                if (_quote.source != null)
+                                  TextSpan(
+                                    text: '  ——${_quote.source}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .outline,
+                                    ),
                                   ),
+                              ],
                             ),
-                          ],
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  fontSize: 14,
+                                  height: 1.6,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          ),
                         ],
                       ),
                     ),
@@ -118,6 +151,7 @@ class HomeScreen extends StatelessWidget {
                 _MainEntryCard(
                   dueCount: dueCount,
                   canContinue: srs.lastSection != null,
+                  sessionPending: session != null,
                   onTap: () => _openMainEntry(context),
                 ),
                 const SizedBox(height: 16),
@@ -170,16 +204,17 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  /// 主入口大卡的分状态跳转：有到期题进复习；否则直达上次学习的卡片页
-  /// （有历史）或章列表（无历史）。
+  /// 主入口大卡的分状态跳转：有到期题、或有未过完的复习会话（哪怕只剩
+  /// 忘记重排的副本没收尾）都进复习；否则直达上次学习的卡片页（有历史）
+  /// 或章列表（无历史）。
   void _openMainEntry(BuildContext context) {
     final scope = AppScope.of(context);
     final srs = scope.srs;
     final session = srs.reviewSession;
     final dueCount = session != null
-        ? session.ids.length - session.index
+        ? distinctRemaining(session.ids, session.index)
         : buildReviewQueue(scope.data, srs).length;
-    if (dueCount > 0) {
+    if (dueCount > 0 || session != null) {
       _push(context, const ReviewScreen());
       return;
     }
@@ -266,11 +301,16 @@ class _Seal extends StatelessWidget {
 class _MainEntryCard extends StatelessWidget {
   final int dueCount;
   final bool canContinue;
+
+  /// 存在未过完的复习会话（去重口径下剩余为 0 时，只剩忘记重排的副本
+  /// 没收尾）—— 文案提示进复习收尾。
+  final bool sessionPending;
   final VoidCallback onTap;
 
   const _MainEntryCard({
     required this.dueCount,
     required this.canContinue,
+    required this.sessionPending,
     required this.onTap,
   });
 
@@ -280,10 +320,14 @@ class _MainEntryCard extends StatelessWidget {
     final hasDue = dueCount > 0;
     final status = hasDue
         ? '按遗忘曲线排好了队，答完这一轮就归零'
-        : (canContinue
-            ? '今天没有到期的题，去上次学到的地方坐坐'
-            : '今天没有到期的题，先开一节板块读读');
-    final cta = hasDue ? '开始复习' : (canContinue ? '继续学习' : '开始学习');
+        : sessionPending
+            ? '这一轮还有重排的题没收尾，点进去过完它'
+            : (canContinue
+                ? '今天没有到期的题，去上次学到的地方坐坐'
+                : '今天没有到期的题，先开一节板块读读');
+    final cta = hasDue
+        ? '开始复习'
+        : (sessionPending ? '继续复习' : (canContinue ? '继续学习' : '开始学习'));
 
     return Container(
       decoration: BoxDecoration(

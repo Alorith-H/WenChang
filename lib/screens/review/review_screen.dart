@@ -31,7 +31,15 @@ class _ReviewScreenState extends State<ReviewScreen>
     with TickerProviderStateMixin {
   List<Question> _queue = const [];
   int _index = 0;
-  int _answered = 0;
+
+  /// 本会话已答过的题 id（去重口径）：完成度与结束页统计都按它汇报 ——
+  /// 队尾重排的重复作答每题只算一次。恢复会话时用前缀（已答部分）播种。
+  final Set<String> _answeredIds = <String>{};
+
+  /// 开局时队列非空 —— 标熟可能把队列删空，那也算一轮结束（小结页），
+  /// 不能落到「今天没有要复习的卡片」的空队列页。
+  bool _startedWithCards = false;
+
   bool _flipped = false;
   bool _initialized = false;
   bool _grading = false;
@@ -139,6 +147,61 @@ class _ReviewScreenState extends State<ReviewScreen>
     if (saved && mounted) {
       messenger.showSnackBar(const SnackBar(content: Text('已保存')));
     }
+  }
+
+  /// 标熟按钮：二次确认后把**当前题**直接置为成熟态（走 SrsService
+  /// 的正规通道 [SrsService.markMature]，持久化，从此不进复习队列），
+  /// 并把该题从会话队列移除 —— 不闪退，原地下标直接跳到下一题。
+  Future<void> _markMature() async {
+    if (_grading || _releasing || _index >= _queue.length) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('标熟'),
+        content: const Text('标记为已熟？之后不再进入复习'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('标熟'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final id = _queue[_index].id;
+    // 正规通道：置成熟态 + 从会话队列移除，一起持久化。
+    await AppScope.of(context).srs.markMature(id);
+    if (!mounted) return;
+
+    // 本地队列镜像同一套移除逻辑（纯函数，含重排副本与下标校正），
+    // 再按同顺序把 id 映射回题目对象。
+    final idRemoval = removeFromQueue(
+      [for (final q in _queue) q.id],
+      _index,
+      id,
+    );
+    final byId = <String, Question>{for (final q in _queue) q.id: q};
+    _flipGateTimer?.cancel();
+    _flipGateTimer = null;
+    if (_releaseAnim.value != 0) _releaseAnim.value = 0;
+    setState(() {
+      _queue = [for (final rid in idRemoval.ids) byId[rid]!];
+      _index = idRemoval.index;
+      _flipped = false;
+      _flipGateOpen = false;
+      _releasing = false;
+      _fadingOut = false;
+      _swiping = false;
+      _swipeId = null;
+      _drag = Offset.zero;
+    });
+    // 下一张：淡入 + 轻微上移归位（队列删空则自然落入小结页）。
+    _enterAnim.forward(from: 0);
   }
 
   /// 轻点翻面；翻到背面时先关手势闸门，400ms 动画过半（答案显形）再开。
@@ -313,6 +376,9 @@ class _ReviewScreenState extends State<ReviewScreen>
           if (byId[id] != null) byId[id]!,
       ];
       _index = session.index.clamp(0, _queue.length).toInt();
+      // 前缀 = 上次已答部分：播种去重口径，重排副本的重复作答继续按
+      // 「每题只算一次」处理（不重复计入每日统计）。
+      _answeredIds.addAll(_queue.sublist(0, _index).map((q) => q.id));
     } else {
       // 无会话：今天到期（due ≤ 今天、未标熟）的题目开局。
       // 「复习随机」设置决定开局是否打乱（关 = 按到期顺序）。
@@ -326,14 +392,24 @@ class _ReviewScreenState extends State<ReviewScreen>
         unawaited(srs.startReviewSession([for (final q in due) q.id]));
       }
     }
+    _startedWithCards = _queue.isNotEmpty;
   }
 
-  /// 写成绩 + 推进会话，然后清干净状态换到下一题，并启动新卡的
+  /// 写成绩 + 忘记重排 + 推进会话，然后清干净状态换到下一题，并启动新卡的
   /// 淡入进场动画（由 [_flyOut] / [_gradeByButton] 在出场完成后调用）。
   Future<void> _commitGrade(Grade grade) async {
     if (_index >= _queue.length) return;
     final srs = AppScope.of(context).srs;
-    await srs.grade(_queue[_index].id, grade);
+    final id = _queue[_index].id;
+    // 去重口径：重排副本的重复作答不进每日统计（SRS 间隔照常更新）。
+    final repeat = _answeredIds.contains(id);
+    await srs.grade(id, grade, countStats: !repeat);
+    // 忘记 → 追加到队尾，同一次会话内稍后再次出现（每题最多
+    // kSessionRequeues 次，超限不再追加、正常往下走）。
+    if (grade == Grade.again && await srs.requeueInSession(id)) {
+      _queue = <Question>[..._queue, _queue[_index]];
+    }
+    _answeredIds.add(id);
     // 推进会话进度；答完最后一题时存档自动删除。
     await srs.advanceReviewSession();
     if (!mounted) return;
@@ -342,7 +418,6 @@ class _ReviewScreenState extends State<ReviewScreen>
     _flipGateTimer = null;
     if (_releaseAnim.value != 0) _releaseAnim.value = 0;
     setState(() {
-      _answered += 1;
       _index += 1;
       _flipped = false;
       _flipGateOpen = false;
@@ -356,20 +431,39 @@ class _ReviewScreenState extends State<ReviewScreen>
     _enterAnim.forward(from: 0);
   }
 
+  /// 一轮结束：正常答完（下标顶到末尾），或标熟把队列删空（开局时非空）。
+  bool get _finished =>
+      _queue.isNotEmpty ? _index >= _queue.length : _startedWithCards;
+
   @override
   Widget build(BuildContext context) {
-    if (_queue.isEmpty) return const _EmptyQueueView();
-    if (_index >= _queue.length) {
-      return _SummaryView(count: _answered);
+    if (_finished) {
+      // 结束页按**去重后的题**汇报 —— 队尾重排的重复作答每题只算一次。
+      return _SummaryView(count: _answeredIds.length);
     }
+    if (_queue.isEmpty) return const _EmptyQueueView();
 
     final scheme = Theme.of(context).colorScheme;
-    final progress = _index / _queue.length;
+    // 完成度走去重口径：重排副本不推高分母、也不算新的完成量。
+    final ids = [for (final q in _queue) q.id];
+    final total = ids.toSet().length;
+    final answered = distinctAnswered(ids, _index);
+    final progress = total > 0 ? answered / total : 0.0;
+    final position = distinctAnswered(ids, _index + 1);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('复习模式'),
         actions: [
+          // 标熟在纠错 ✎ 左边：图标用勋章（区别于收藏的星标）。
+          IconButton(
+            icon: const Icon(Icons.workspace_premium_outlined),
+            tooltip: '标熟',
+            visualDensity: VisualDensity.compact,
+            onPressed: !_grading && !_releasing && _index < _queue.length
+                ? _markMature
+                : null,
+          ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: '纠错',
@@ -389,7 +483,7 @@ class _ReviewScreenState extends State<ReviewScreen>
               child: Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  '${_index + 1} / ${_queue.length}',
+                  '$position / $total',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,

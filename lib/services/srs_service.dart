@@ -64,13 +64,20 @@ class LastStudy {
 }
 
 /// An in-progress review session: a shuffled queue of question ids plus the
-/// current position. Persisted as `{ids: [...], index: n}` so an unfinished
-/// run survives process death and resumes exactly where it stopped.
+/// current position. Persisted as `{ids: [...], index: n, requeues: {...}}`
+/// so an unfinished run survives process death and resumes exactly where it
+/// stopped. [requeues] 记录 id → 本会话已被「忘记」重排到队尾的次数
+/// （每题上限 [kSessionRequeues]）。
 class ReviewSession {
   final List<String> ids;
   final int index;
+  final Map<String, int> requeues;
 
-  const ReviewSession({required this.ids, required this.index});
+  const ReviewSession({
+    required this.ids,
+    required this.index,
+    this.requeues = const {},
+  });
 }
 
 /// One calendar day's answering totals: [answers] graded cards, of which
@@ -302,9 +309,22 @@ class SrsService extends ChangeNotifier {
             final cleaned =
                 ids.whereType<String>().where((s) => s.isNotEmpty).toList();
             final pos = index is int ? index : 0;
+            // 忘记重排计数：id → 次数；缺字段 / 坏条目一律丢弃（上限
+            // 判定只会因此更宽松一格，不会崩）。
+            final requeues = <String, int>{};
+            final rq = decoded['requeues'];
+            if (rq is Map<String, dynamic>) {
+              rq.forEach((id, v) {
+                if (id.isNotEmpty && v is int && v > 0) requeues[id] = v;
+              });
+            }
             // A session at/past its end is complete — treat as absent.
             if (cleaned.isNotEmpty && pos >= 0 && pos < cleaned.length) {
-              session = ReviewSession(ids: cleaned, index: pos);
+              session = ReviewSession(
+                ids: cleaned,
+                index: pos,
+                requeues: requeues,
+              );
             }
           }
         }
@@ -717,14 +737,19 @@ class SrsService extends ChangeNotifier {
 
   /// Records one answered question: advances the session index, and on the
   /// last question completes the session (the archive is deleted; the
-  /// per-question SRS states are kept by [grade]).
+  /// per-question SRS states are kept by [grade]). 队尾重排的副本排在后面，
+  /// 因此「忘记」追加后照常 +1 即可落在下一张（恰是重排副本时立刻重见）。
   Future<void> advanceReviewSession() async {
     final session = _session;
     if (session == null) return;
     final next = session.index + 1;
     _session = next >= session.ids.length
         ? null
-        : ReviewSession(ids: session.ids, index: next);
+        : ReviewSession(
+            ids: session.ids,
+            index: next,
+            requeues: session.requeues,
+          );
     await _persist();
     notifyListeners();
   }
@@ -741,7 +766,53 @@ class SrsService extends ChangeNotifier {
     _session = ReviewSession(
       ids: <String>[...session.ids, ...fresh],
       index: session.index,
+      requeues: session.requeues,
     );
+  }
+
+  /// 忘记重排：把刚评为「忘记」的 [id] 追加到当前会话队尾，同一次会话内
+  /// 稍后再次出现 —— 每题最多 [kSessionRequeues] 次（超限 / 无会话返回
+  /// false，队列原样）。返回这次是否真的入队。不单独广播：调用方紧跟着
+  /// [advanceReviewSession]，由它统一 notify。
+  Future<bool> requeueInSession(String id) async {
+    final session = _session;
+    if (session == null || id.isEmpty) return false;
+    final outcome = requeueForgotten(session.ids, id, session.requeues);
+    if (!outcome.appended) return false;
+    _session = ReviewSession(
+      ids: outcome.ids,
+      index: session.index,
+      requeues: outcome.requeues,
+    );
+    await _persist();
+    return true;
+  }
+
+  /// 从进行中的会话队列移除 [id] 的全部出现（含队尾重排副本）并校正进度
+  /// 下标；移完即视为会话完成（存档删除）。队列里没有该题时不动。
+  void _removeFromSession(String id) {
+    final session = _session;
+    if (session == null) return;
+    final removal = removeFromQueue(session.ids, session.index, id);
+    if (removal.ids.length == session.ids.length) return; // 队列里没有该题
+    _session = removal.done
+        ? null
+        : ReviewSession(
+            ids: removal.ids,
+            index: removal.index,
+            requeues: session.requeues,
+          );
+  }
+
+  /// 「标熟」按钮的正规通道：[forceMature] 把题直接置为成熟态（goodCount
+  /// 至少补到 3，与累计 3 次毕业同口径），再把它从进行中的会话队列移除，
+  /// 一起持久化。该题从此永远不进复习队列。
+  Future<void> markMature(String questionId) async {
+    if (questionId.isEmpty) return;
+    _states[questionId] = forceMature(stateOf(questionId));
+    _removeFromSession(questionId);
+    await _persist();
+    notifyListeners();
   }
 
   /// Drops the in-progress session (used when it completes or is cleared).
@@ -864,16 +935,26 @@ class SrsService extends ChangeNotifier {
   /// Records one review answer and persists the new state: the per-question
   /// schedule, today's answer totals (for the weekly stats) and today as an
   /// active day (打卡 streak).
-  Future<void> grade(String questionId, Grade grade,
-      [DateTime? now]) async {
+  ///
+  /// [countStats] = false 用于**队尾重排的重复作答**：SRS 间隔照常更新
+  /// （忘记 → 拉长逻辑不变），但不计入每日统计 n/g —— 完成度口径按去重
+  /// 后的题数，每题只算一次；连续打卡走的是日期集合，重复作答天然幂等。
+  Future<void> grade(
+    String questionId,
+    Grade grade, {
+    DateTime? now,
+    bool countStats = true,
+  }) async {
     final today = now ?? DateTime.now();
     final day = formatDay(today);
     _states[questionId] = applyGrade(stateOf(questionId), grade, today);
 
-    final record = _daily.putIfAbsent(day, () => {'n': 0, 'g': 0});
-    record['n'] = (record['n'] ?? 0) + 1;
-    if (grade == Grade.good) {
-      record['g'] = (record['g'] ?? 0) + 1;
+    if (countStats) {
+      final record = _daily.putIfAbsent(day, () => {'n': 0, 'g': 0});
+      record['n'] = (record['n'] ?? 0) + 1;
+      if (grade == Grade.good) {
+        record['g'] = (record['g'] ?? 0) + 1;
+      }
     }
     _markActive(day);
 
@@ -921,7 +1002,11 @@ class SrsService extends ChangeNotifier {
       } else {
         await _prefs.setString(
           _kSessionKey,
-          jsonEncode({'ids': session.ids, 'index': session.index}),
+          jsonEncode({
+            'ids': session.ids,
+            'index': session.index,
+            'requeues': session.requeues,
+          }),
         );
       }
       await _prefs.setString(_kDailyKey, jsonEncode(_daily));
