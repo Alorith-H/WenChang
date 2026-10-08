@@ -86,19 +86,24 @@ class LastStudy {
 }
 
 /// An in-progress review session: a shuffled queue of question ids plus the
-/// current position. Persisted as `{ids: [...], index: n, requeues: {...}}`
-/// so an unfinished run survives process death and resumes exactly where it
+/// current position. Persisted as
+/// `{ids: [...], index: n, requeues: {...}, completed: [...]}` so an
+/// unfinished run survives process death and resumes exactly where it
 /// stopped. [requeues] 记录 id → 本会话已被「忘记」重排到队尾的次数
-/// （每题上限 [kSessionRequeues]）。
+/// （每题上限 [kSessionRequeues]）。[completed] 是本会话已评为 生疏/熟练
+/// 的题 id（完成口径的分子；「忘记」不计入，同一题只记一次）。旧存档缺
+/// completed 字段时按已答前缀播种降级（见 `SrsService.load`）。
 class ReviewSession {
   final List<String> ids;
   final int index;
   final Map<String, int> requeues;
+  final Set<String> completed;
 
   const ReviewSession({
     required this.ids,
     required this.index,
     this.requeues = const {},
+    this.completed = const {},
   });
 }
 
@@ -353,10 +358,21 @@ class SrsService extends ChangeNotifier {
             }
             // A session at/past its end is complete — treat as absent.
             if (cleaned.isNotEmpty && pos >= 0 && pos < cleaned.length) {
+              // 完成集合（生疏/熟练口径）：新存档带 completed 列表；旧存档
+              // 缺字段 → 按已答前缀（0..index 去重）播种降级 —— 升级不丢
+              // 已显示的进度，坏条目（空串/非字符串）一律丢弃。
+              final rawCompleted = decoded['completed'];
+              final completed = rawCompleted is List
+                  ? rawCompleted
+                        .whereType<String>()
+                        .where((s) => s.isNotEmpty)
+                        .toSet()
+                  : cleaned.sublist(0, pos).toSet();
               session = ReviewSession(
                 ids: cleaned,
                 index: pos,
                 requeues: requeues,
+                completed: completed,
               );
             }
           }
@@ -807,9 +823,28 @@ class SrsService extends ChangeNotifier {
             ids: session.ids,
             index: next,
             requeues: session.requeues,
+            completed: session.completed,
           );
     await _persist();
     notifyListeners();
+  }
+
+  /// 完成口径：把刚评为 生疏/熟练 的 [id] 记入本会话的「已完成」集合 ——
+  /// 顶部计数与结束页的分子都按它汇报（同一题只 +1 一次，忘记不调用本
+  /// 方法）。幂等：已记入时直接返回。不单独广播：调用方紧跟着
+  /// [advanceReviewSession]，由它统一 notify。
+  Future<void> completeInSession(String id) async {
+    final session = _session;
+    if (session == null || id.isEmpty || session.completed.contains(id)) {
+      return;
+    }
+    _session = ReviewSession(
+      ids: session.ids,
+      index: session.index,
+      requeues: session.requeues,
+      completed: {...session.completed, id},
+    );
+    await _persist();
   }
 
   /// Appends newly due question ids to the end of the active session
@@ -825,6 +860,7 @@ class SrsService extends ChangeNotifier {
       ids: <String>[...session.ids, ...fresh],
       index: session.index,
       requeues: session.requeues,
+      completed: session.completed,
     );
   }
 
@@ -841,6 +877,7 @@ class SrsService extends ChangeNotifier {
       ids: outcome.ids,
       index: session.index,
       requeues: outcome.requeues,
+      completed: session.completed,
     );
     await _persist();
     return true;
@@ -859,6 +896,7 @@ class SrsService extends ChangeNotifier {
             ids: removal.ids,
             index: removal.index,
             requeues: session.requeues,
+            completed: session.completed,
           );
   }
 
@@ -1064,6 +1102,7 @@ class SrsService extends ChangeNotifier {
             'ids': session.ids,
             'index': session.index,
             'requeues': session.requeues,
+            'completed': session.completed.toList(),
           }),
         );
       }

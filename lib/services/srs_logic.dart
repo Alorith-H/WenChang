@@ -205,16 +205,18 @@ RequeueOutcome requeueForgotten(
   );
 }
 
-/// 完成度（去重口径，每题只算一次）：队列前缀里已经作答过的**不同题数**。
-/// 队尾重排的重复作答让同一题在前缀里出现多次也只计 1。
+/// 已答（去重口径，每题只算一次）：队列前缀里已经作答过的**不同题数**
+/// （任何评级都算，含忘记）。注意这不是复习页顶部计数的「完成」口径 ——
+/// 完成口径只算 生疏/熟练，由会话的 completed 集合维护
+/// （见 `SrsService.completeInSession`）。
 int distinctAnswered(List<String> ids, int index) {
   final end = index.clamp(0, ids.length).toInt();
   return ids.sublist(0, end).toSet().length;
 }
 
-/// 完成度（去重口径）：后缀中没在前缀（已答）出现过的不同题数 —— 即
-/// 「今日待复习」还剩几题。忘记重排出队尾的副本已答过，不计入剩余，
-/// 因此重排既不会让「已完成」提前、也不会推后。
+/// 「今日待复习」剩余（去重口径，首页用）：后缀中没在前缀（已答）出现过
+/// 的不同题数。忘记重排出队尾的副本已答过，不计入剩余，因此重排既不会
+/// 让「已答」提前、也不会推后。
 int distinctRemaining(List<String> ids, int index) {
   final start = index.clamp(0, ids.length).toInt();
   final seen = ids.sublist(0, start).toSet();

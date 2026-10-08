@@ -19,8 +19,9 @@ import '../learn/chapter_list_screen.dart';
 /// 进入时若存在未完成的复习会话 → 原样恢复（同一份乱序队列、同一进度）；
 /// 否则取今天到期的题目生成新会话 —— 是否随机打乱由设置里的「复习随机」
 /// 决定（开=打乱，关=按到期顺序）。会话持久化在 [SrsService]
-/// （SharedPreferences `{ids, index}`），答题推进进度，答完最后一题自动
-/// 完成并删除存档；中途退出（返回键/杀进程）再进都接上一次的状态。
+/// （SharedPreferences `{ids, index, requeues, completed}`），答题推进进度，
+/// 答完最后一题自动完成并删除存档；中途退出（返回键/杀进程）再进都接上
+/// 一次的状态。
 class ReviewScreen extends StatefulWidget {
   const ReviewScreen({super.key});
 
@@ -33,9 +34,16 @@ class _ReviewScreenState extends State<ReviewScreen>
   List<Question> _queue = const [];
   int _index = 0;
 
-  /// 本会话已答过的题 id（去重口径）：完成度与结束页统计都按它汇报 ——
-  /// 队尾重排的重复作答每题只算一次。恢复会话时用前缀（已答部分）播种。
+  /// 本会话已答过的题 id（去重口径）：只用于每日统计的重复作答回避
+  /// （`countStats: !repeat`）。恢复会话时用前缀（已答部分）播种。
+  /// 进度计数与结束页不看它 —— 那是 [_completedIds] 的完成口径。
   final Set<String> _answeredIds = <String>{};
+
+  /// 本会话已「完成」的题 id（完成口径，去重）：顶部计数与结束页的分子
+  /// 都按它汇报 —— 只有 生疏/熟练 计入，「忘记」不计；重排副本后来答成
+  /// 生疏/熟练 时才 +1，同一题只 +1 一次。恢复会话时由存档的
+  /// `completed` 播种（旧存档缺字段由 SrsService 按已答前缀降级播种）。
+  final Set<String> _completedIds = <String>{};
 
   /// 开局时队列非空 —— 标熟可能把队列删空，那也算一轮结束（小结页），
   /// 不能落到「今天没有要复习的卡片」的空队列页。
@@ -380,6 +388,9 @@ class _ReviewScreenState extends State<ReviewScreen>
       // 前缀 = 上次已答部分：播种去重口径，重排副本的重复作答继续按
       // 「每题只算一次」处理（不重复计入每日统计）。
       _answeredIds.addAll(_queue.sublist(0, _index).map((q) => q.id));
+      // 完成集合从存档延续：恢复后顶部计数接着上次的分子走
+      // （忘记不在此集合 → 分子不虚增）。
+      _completedIds.addAll(session.completed);
     } else {
       // 无会话：今天到期（due ≤ 今天、未标熟）的题目开局。
       // 「复习随机」设置决定开局是否打乱（关 = 按到期顺序）。
@@ -406,9 +417,16 @@ class _ReviewScreenState extends State<ReviewScreen>
     final repeat = _answeredIds.contains(id);
     await srs.grade(id, grade, countStats: !repeat);
     // 忘记 → 追加到队尾，同一次会话内稍后再次出现（每题最多
-    // kSessionRequeues 次，超限不再追加、正常往下走）。
-    if (grade == Grade.again && await srs.requeueInSession(id)) {
-      _queue = <Question>[..._queue, _queue[_index]];
+    // kSessionRequeues 次，超限不再追加、正常往下走）；忘记**不算完成**，
+    // 顶部计数的分子不动。生疏/熟练 → 记入完成集合（同一题只 +1 一次）。
+    if (grade == Grade.again) {
+      if (await srs.requeueInSession(id)) {
+        _queue = <Question>[..._queue, _queue[_index]];
+      }
+    } else {
+      _completedIds.add(id);
+      // 落盘要在 advance 之前 —— 答完最后一题时 advance 会删掉会话存档。
+      await srs.completeInSession(id);
     }
     _answeredIds.add(id);
     // 推进会话进度；答完最后一题时存档自动删除。
@@ -439,18 +457,23 @@ class _ReviewScreenState extends State<ReviewScreen>
   @override
   Widget build(BuildContext context) {
     if (_finished) {
-      // 结束页按**去重后的题**汇报 —— 队尾重排的重复作答每题只算一次。
-      return _SummaryView(count: _answeredIds.length);
+      // 结束页与顶部计数同一完成口径：完成 N / 总 M —— 忘记、重排上限
+      // 用尽仍未完成的题都自然归入「未完成」，不特殊展示。
+      final idSet = {for (final q in _queue) q.id};
+      return _SummaryView(
+        completed: _completedIds.intersection(idSet).length,
+        total: idSet.length,
+      );
     }
     if (_queue.isEmpty) return const _EmptyQueueView();
 
     final scheme = Theme.of(context).colorScheme;
-    // 完成度走去重口径：重排副本不推高分母、也不算新的完成量。
-    final ids = [for (final q in _queue) q.id];
-    final total = ids.toSet().length;
-    final answered = distinctAnswered(ids, _index);
-    final progress = total > 0 ? answered / total : 0.0;
-    final position = distinctAnswered(ids, _index + 1);
+    // 完成口径：分子 = 本会话已评为 生疏/熟练 的不同题数（忘记不计），
+    // 分母 = 队列去重总题数（重排副本不推高 —— 显示 10 就是 10）。
+    final idSet = {for (final q in _queue) q.id};
+    final total = idSet.length;
+    final completed = _completedIds.intersection(idSet).length;
+    final progress = total > 0 ? completed / total : 0.0;
 
     return Scaffold(
       appBar: AppBar(
@@ -484,7 +507,7 @@ class _ReviewScreenState extends State<ReviewScreen>
               child: Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  '$position / $total',
+                  '$completed / $total',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -1052,11 +1075,13 @@ class _EmptyQueueView extends StatelessWidget {
   }
 }
 
-/// 一轮结束的小结。
+/// 一轮结束的小结 —— 与顶部计数同一**完成口径**：[completed] = 本会话已评为
+/// 生疏/熟练 的不同题数（忘记不计），[total] = 队列去重总题数。
 class _SummaryView extends StatelessWidget {
-  final int count;
+  final int completed;
+  final int total;
 
-  const _SummaryView({required this.count});
+  const _SummaryView({required this.completed, required this.total});
 
   @override
   Widget build(BuildContext context) {
@@ -1085,7 +1110,11 @@ class _SummaryView extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  '本次复习 $count 题',
+                  // 队列被标熟删空时 total=0（此时 completed 也为 0），
+                  // 退化为单数字，避免出现「0 / 0」。
+                  total > 0
+                      ? '完成 $completed / 总 $total 题'
+                      : '本次完成 $completed 题',
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,

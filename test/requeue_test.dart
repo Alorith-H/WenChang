@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenchang/services/srs_logic.dart';
@@ -5,8 +7,9 @@ import 'package:wenchang/services/srs_service.dart';
 
 /// 议题 #2（忘记重排）+ #7（标熟按钮）的数据层与纯函数测试：
 /// - 忘记 → 入队尾、sessionRequeues=3 上限、超限正常结束；
-/// - 完成度去重（已答 / 剩余）—— 重排副本每题只算一次，「已完成」不被
-///   重排推前/推后；
+/// - 完成口径（顶部计数 / 结束页分子）：忘记不加分、队尾重排答熟后才
+///   +1、重复不叠加、恢复会话延续、旧存档缺字段降级；
+/// - 已答去重 / 今日待复习剩余（首页口径，与完成口径分开）；
 /// - forceMature / removeFromQueue：标熟的纯逻辑；
 /// - SrsService：requeueInSession 持久化、grade(countStats:false) 不进
 ///   每日统计、markMature 落库并把题移出会话队列。
@@ -64,25 +67,116 @@ void main() {
     });
   });
 
-  group('完成度去重（已答 / 剩余）', () {
-    test('distinctAnswered：前缀按题去重，重排副本只算一次', () {
+  group('完成口径（顶部计数 / 结束页分子）', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+    });
+
+    test('忘记不加分：重排 + 推进后 completed 仍为空', () async {
+      final srs = await SrsService.load();
+      await srs.startReviewSession(['q1', 'q2']);
+
+      expect(await srs.requeueInSession('q1'), isTrue);
+      await srs.advanceReviewSession();
+
+      final session = srs.reviewSession!;
+      expect(session.completed, isEmpty, reason: '忘记不计入完成 —— 分子不动');
+      expect(session.ids.toSet().length, 2, reason: '分母也不因重排变化');
+    });
+
+    test('重排答熟后才加分；重复不叠加；分母不出现 11', () async {
+      final srs = await SrsService.load();
+      final ids = [for (var i = 1; i <= 10; i++) 'q$i'];
+      await srs.startReviewSession(ids);
+
+      // 首轮：q3 忘记重排，其余 9 题答成 生疏/熟练。
+      for (final id in ids) {
+        if (id == 'q3') {
+          expect(await srs.requeueInSession(id), isTrue);
+        } else {
+          await srs.completeInSession(id);
+        }
+        await srs.advanceReviewSession();
+      }
+      var session = srs.reviewSession!;
+      expect(
+        '${session.completed.length} / ${session.ids.toSet().length}',
+        '9 / 10',
+        reason: '忘 1 → 完成 9/10；重排副本不推高分母',
+      );
+      expect(session.ids.length, 11, reason: '队列里确有 1 个重排副本');
+
+      // 队尾的重排副本后来答熟 → 那时才 +1（同一题只 +1 一次）。
+      await srs.completeInSession('q3');
+      session = srs.reviewSession!;
+      expect(session.completed.length, 10);
+      expect(session.ids.toSet().length, 10, reason: '显示 10 就是 10');
+
+      // 重复记入不叠加（幂等）。
+      await srs.completeInSession('q3');
+      expect(srs.reviewSession!.completed.length, 10, reason: '重复 +0');
+
+      await srs.advanceReviewSession();
+      expect(srs.reviewSession, isNull, reason: '队列走完 → 会话结束');
+    });
+
+    test('恢复会话：completed 随存档往返，重排 / 标熟移除都不丢', () async {
+      final srs = await SrsService.load();
+      await srs.startReviewSession(['q1', 'q2', 'q3']);
+      await srs.completeInSession('q1');
+      await srs.advanceReviewSession();
+      expect(await srs.requeueInSession('q2'), isTrue); // q2 忘记追加副本
+      await srs.markMature('q3'); // q3 标熟移出队列
+
+      final back = (await SrsService.load()).reviewSession!;
+      expect(back.completed, {'q1'}, reason: '恢复后分子延续，不回零');
+      expect(back.completed.contains('q2'), isFalse, reason: '忘记过的 q2 仍未完成');
+      expect(back.ids.toSet(), {'q1', 'q2'}, reason: 'q3 已移除、q2 副本保留');
+    });
+
+    test('旧存档缺 completed 字段 → 按已答前缀降级播种', () async {
+      SharedPreferences.setMockInitialValues({
+        'review_session': jsonEncode({
+          'ids': ['q1', 'q2', 'q3'],
+          'index': 2,
+          'requeues': <String, int>{},
+        }),
+      });
+      final srs = await SrsService.load();
+      expect(
+        srs.reviewSession!.completed,
+        {'q1', 'q2'},
+        reason: '缺字段 → 已答前缀播种，升级不丢已显示的进度',
+      );
+
+      // 之后继续按完成口径走：q3 答熟 +1，落盘为新格式。
+      await srs.completeInSession('q3');
+      final back = (await SrsService.load()).reviewSession!;
+      expect(back.completed, {'q1', 'q2', 'q3'}, reason: '新格式持久化往返');
+    });
+  });
+
+  group('已答去重 / 今日待复习剩余（首页口径）', () {
+    test('distinctAnswered：已答口径（任何评级含忘记），前缀按题去重', () {
       expect(distinctAnswered(['q1', 'q2', 'q3'], 3), 3);
       expect(distinctAnswered(['q1', 'q2', 'q3'], 0), 0);
 
       // q2 忘记重排到队尾后又答了一遍：
       final ids = ['q1', 'q2', 'q3', 'q2'];
-      expect(distinctAnswered(ids, 4), 3, reason: '重复作答不推高完成量');
+      expect(distinctAnswered(ids, 4), 3, reason: '重复作答不推高已答量');
       expect(distinctAnswered(ids, 99), 3, reason: '越界 clamp 到队尾');
     });
 
-    test('distinctRemaining：首次全过 + 1 题重排 → 剩余 0（不推后完成）', () {
+    test('distinctRemaining：首轮走完 + 1 题重排 → 剩余 0（首页口径）', () {
       // 10 题，q3 忘记重排在队尾；下标走完首轮（index=10）。
+      // 这是首页「今日待复习」口径；顶部计数的完成口径见上一组
+      // （忘 1 → 完成 9/10，两者互不替代）。
       final ids = [
         for (var i = 1; i <= 10; i++) 'q$i',
         'q3',
       ];
-      expect(distinctRemaining(ids, 10), 0, reason: '去重口径：已完成');
-      // 旧口径 ids.length - index = 11 - 10 = 1 会把「已完成」推后一天。
+      expect(distinctRemaining(ids, 10), 0);
+      // 旧口径 ids.length - index = 11 - 10 = 1 会把剩余虚增一天。
     });
 
     test('distinctRemaining：进行中只剩未答的题，重排副本不虚增', () {
