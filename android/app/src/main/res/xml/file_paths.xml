@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 任务 16：系统安装器经 FileProvider 读取的路径。更新 APK 下载到应用
+     缓存目录（path_provider getApplicationCacheDirectory → context.cacheDir），
+     <cache-path path="."> 覆盖整个缓存目录（update.apk）。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="updates" path="."/>
+</paths>

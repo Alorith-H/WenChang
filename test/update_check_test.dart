@@ -176,5 +176,35 @@ void main() {
         isTrue,
       );
     });
+
+    test('assets[].apk → ReleaseInfo.apkUrl；无 assets / 非 apk → null', () {
+      final release = parseRelease({
+        'tag_name': 'v1.2.0',
+        'html_url': 'https://example.com/r',
+        'assets': [
+          {'name': 'source.zip', 'browser_download_url': 'https://x/s.zip'},
+          {'name': 'wc.apk', 'browser_download_url': 'https://x/wc.apk'},
+        ],
+      })!;
+      expect(release.apkUrl, 'https://x/wc.apk');
+      // 无 assets 字段（老 release / 坏数据）→ null，「去下载」走 fallback。
+      expect(
+        parseRelease({
+          'tag_name': 'v1.2.0',
+          'html_url': 'https://example.com/r',
+        })!.apkUrl,
+        isNull,
+      );
+      expect(
+        parseRelease({
+          'tag_name': 'v1.2.0',
+          'html_url': 'https://example.com/r',
+          'assets': [
+            {'name': 'source.zip', 'browser_download_url': 'https://x/s.zip'},
+          ],
+        })!.apkUrl,
+        isNull,
+      );
+    });
   });
 }

@@ -4,10 +4,13 @@ import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'update_download.dart';
+
 /// 检查更新（议题 #5）—— 对 GitHub Release 的最新版本。
 ///
 /// - [isNewer] / [normalizeVersion] / [shouldShowBanner] / [parseRelease]
-///   全是纯函数，单测覆盖（test/update_check_test.dart）。
+///   全是纯函数，单测覆盖（test/update_check_test.dart）；解析时顺带
+///   用 update_download 的 [selectApkAsset] 提取 `.apk` 资产直链。
 /// - [fetchLatestRelease] 8 秒超时，任何网络失败都静默返回 null ——
 ///   手动检查据此弹「检查失败」SnackBar，冷启动静默检查直接无感丢弃。
 /// - `dismissed_version` 记忆横幅已忽略的版本，同版本不重复骚扰。
@@ -33,14 +36,19 @@ class ReleaseInfo {
   /// Release 正文原文（更新内容；缺失时为空串）。
   final String body;
 
-  /// Release 页面地址（「去下载」按钮打开它）。
+  /// Release 页面地址（下载失败兜底时打开它，不是 asset 直链）。
   final String htmlUrl;
+
+  /// Release `assets[]` 里第一个 `.apk` 资产直链（任务 16）。null = 无
+  /// apk 资产 —— 点「去下载」直接走 fallback 打开 [htmlUrl]，不进入下载。
+  final String? apkUrl;
 
   const ReleaseInfo({
     required this.version,
     required this.tagName,
     required this.body,
     required this.htmlUrl,
+    this.apkUrl,
   });
 }
 
@@ -101,6 +109,8 @@ ReleaseInfo? parseRelease(Object? json) {
     version: normalizeVersion(tag),
     body: body is String ? body : '',
     htmlUrl: url.trim(),
+    // assets[] 里挑 .apk（任务 16）；无资产 → null，由对话框兜底跳页。
+    apkUrl: selectApkAsset(json['assets']),
   );
 }
 
